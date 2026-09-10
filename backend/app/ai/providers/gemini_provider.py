@@ -89,6 +89,10 @@ class GeminiProvider(AbstractAIProvider):
                     last_error = e
                     err_str = str(e)
                     logger.warning(f"GeminiProvider API attempt (model={target_model}) {attempt + 1}/{max_retries + 1} failed: {e}")
+                    if any(k in err_str for k in ["401", "403", "API_KEY_INVALID", "PERMISSION_DENIED"]):
+                        self.circuit_open = True
+                        self.circuit_reason = f"Gemini API auth error: {e}"
+                        raise last_error
                     if any(k in err_str for k in ["404", "NOT_FOUND", "not found"]):
                         # Try next candidate model
                         break

@@ -4,8 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { Badge } from '../ui/Badge';
 import { Cpu, Trash2, PlusCircle, Sun, Moon, Download } from 'lucide-react';
 import { getActiveSessionId, createNewSession, clearCurrentSession, initSession } from '../../lib/session';
-import { exportSessionCsv } from '../../lib/api/export';
+import { exportSessionCsv, exportCleanIntelligenceCsv } from '../../lib/api/export';
 import { useTheme } from '../../lib/theme-context';
+import { ConnectivityIndicator } from './ConnectivityIndicator';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '/api/v1';
 
@@ -73,17 +74,13 @@ export const Header: React.FC = () => {
       checkSessionStatus(newSid);
     };
 
-    const handleCatalogUpdate = () => {
-      checkSessionStatus();
-    };
-
     window.addEventListener('session-changed', handleSessionChange);
-    window.addEventListener('catalog-updated', handleCatalogUpdate);
+    window.addEventListener('catalog-updated', () => checkSessionStatus());
 
     return () => {
       clearInterval(timer);
       window.removeEventListener('session-changed', handleSessionChange);
-      window.removeEventListener('catalog-updated', handleCatalogUpdate);
+      window.removeEventListener('catalog-updated', () => checkSessionStatus());
     };
   }, []);
 
@@ -106,6 +103,22 @@ export const Header: React.FC = () => {
     } catch (err: any) {
       console.error('Export CSV error:', err);
       alert(`Export CSV Error: ${err.message || 'Failed to download export file'}`);
+    } finally {
+      setExporting(false);
+      checkSessionStatus();
+    }
+  };
+
+  const handleExportCleanCsv = async () => {
+    setExporting(true);
+    try {
+      const res = await exportCleanIntelligenceCsv();
+      if (!res.success) {
+        alert(res.message || 'Clean export failed. Please ensure catalog products exist in active session.');
+      }
+    } catch (err: any) {
+      console.error('Clean Export CSV error:', err);
+      alert(`Clean Export CSV Error: ${err.message || 'Failed to download clean export file'}`);
     } finally {
       setExporting(false);
       checkSessionStatus();
@@ -188,7 +201,17 @@ export const Header: React.FC = () => {
           title="Export 252-Column Unilog Delivery CSV"
         >
           <Download className="w-3.5 h-3.5" />
-          {exporting ? 'Exporting...' : 'Export CSV'}
+          {exporting ? 'Exporting...' : '252-Col Delivery'}
+        </button>
+
+        <button
+          onClick={handleExportCleanCsv}
+          disabled={exporting}
+          className="px-2.5 py-1.5 rounded text-[11px] font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900 border border-blue-200 dark:border-blue-800 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+          title="Export Clean Intelligence CSV (Human-readable, only populated semantic attributes)"
+        >
+          <Download className="w-3.5 h-3.5" />
+          {exporting ? 'Exporting...' : 'Clean CSV'}
         </button>
 
         <button
@@ -210,6 +233,8 @@ export const Header: React.FC = () => {
         </button>
 
         <div className="h-4 w-px bg-slate-300 dark:bg-slate-800 my-auto mx-1" />
+
+        <ConnectivityIndicator />
 
         <div className="flex items-center gap-2">
           {aiBadge.variant === 'ACTIVE' ? (

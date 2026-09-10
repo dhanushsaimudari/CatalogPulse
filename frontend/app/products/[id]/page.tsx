@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { Product } from '../../../types/product';
-import { fetchProductById, reprocessProduct } from '../../../lib/api/products';
+import { fetchProductById, reprocessProduct, fetchProductAudit } from '../../../lib/api/products';
 import { EnrichmentCanvas } from '../../../components/enrichment/EnrichmentCanvas';
 import { QualityScoreCard } from '../../../components/enrichment/QualityScoreCard';
 import { DescriptionTabs } from '../../../components/enrichment/DescriptionTabs';
@@ -19,6 +19,7 @@ export default function ProductDetailPage() {
   const params = useParams();
   const id = (params?.id as string) || 'prod-101';
   const [product, setProduct] = useState<Product | null>(null);
+  const [auditEvents, setAuditEvents] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'canvas' | 'content' | 'validation' | 'autofix' | 'audit'>('canvas');
   const [loading, setLoading] = useState(true);
 
@@ -30,6 +31,8 @@ export default function ProductDetailPage() {
     setLoading(true);
     const p = await fetchProductById(id);
     setProduct(p);
+    const audits = await fetchProductAudit(id);
+    setAuditEvents(audits || []);
     setLoading(false);
   };
 
@@ -209,21 +212,47 @@ export default function ProductDetailPage() {
       {/* TAB CONTENT: AUDIT HISTORY */}
       {activeTab === 'audit' && (
         <Card className="space-y-4 font-mono text-xs">
-          <h2 className="font-bold text-slate-800 dark:text-slate-200 uppercase">Product Lifecycle Audit Log</h2>
-          <div className="space-y-2">
-            {product.audit_trail.map((log, i) => (
-              <div key={i} className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded flex justify-between items-center">
-                <div>
-                  <span className="text-blue-600 dark:text-blue-400 font-bold">{log.event_type}</span>
-                  <p className="text-slate-700 dark:text-slate-300 text-[11px]">{log.description}</p>
+          {(() => {
+            const displayLogs = auditEvents.length > 0 ? auditEvents : (product.audit_trail || []);
+            return (
+              <>
+                <div className="flex items-center justify-between">
+                  <h2 className="font-bold text-slate-800 dark:text-slate-200 uppercase">Product Lifecycle Audit Log</h2>
+                  <span className="text-[11px] text-slate-500">{displayLogs.length} Recorded Events</span>
                 </div>
-                <div className="text-right">
-                  <span className="text-slate-400 dark:text-slate-500 block text-[10px]">{log.timestamp}</span>
-                  <span className="text-slate-500 dark:text-slate-400 text-[10px]">Actor: {log.actor}</span>
+                <div className="space-y-2">
+                  {displayLogs.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-950 rounded border border-slate-200 dark:border-slate-800">
+                      No audit events recorded for this SKU yet.
+                    </div>
+                  ) : (
+                    displayLogs.map((log: any, i: number) => (
+                <div key={i} className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded flex flex-col md:flex-row md:items-center justify-between gap-2">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-blue-600 dark:text-blue-400 font-bold">{log.event_type}</span>
+                      {log.field && <span className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-[10px] text-slate-700 dark:text-slate-300 font-semibold">{log.field}</span>}
+                    </div>
+                    <p className="text-slate-700 dark:text-slate-300 text-[11px]">{log.description}</p>
+                    {(log.old_value !== undefined && log.new_value !== undefined && log.old_value !== null && log.new_value !== null) && (
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 pt-0.5">
+                        <span className="line-through text-rose-500">{log.old_value}</span>
+                        <span>➔</span>
+                        <span className="text-emerald-500 font-semibold">{log.new_value}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-slate-400 dark:text-slate-500 block text-[10px]">{log.timestamp}</span>
+                    <span className="text-slate-500 dark:text-slate-400 text-[10px]">Actor: {log.actor}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
+        </>
+      );
+    })()}
         </Card>
       )}
     </div>

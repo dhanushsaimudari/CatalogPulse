@@ -45,3 +45,27 @@ def autofix_review(review_id: str, session_id: Optional[str] = Query(None)):
     if not res:
         raise HTTPException(status_code=404, detail="Review item not found.")
     return res.model_dump()
+
+@router.post("/reviews/{review_id}/edit")
+def edit_review(
+    review_id: str,
+    custom_value: str = Query(...),
+    session_id: Optional[str] = Query(None)
+):
+    session = session_manager.get_or_create_session(session_id)
+    res = review_service.edit_review(session, review_id, custom_value)
+    if not res:
+        raise HTTPException(status_code=404, detail="Review item not found.")
+    return res.model_dump()
+
+@router.post("/reviews/bulk-fix")
+def bulk_fix_reviews(
+    payload: dict = {},
+    session_id: Optional[str] = Query(None)
+):
+    session = session_manager.get_or_create_session(session_id)
+    review_ids = payload.get("review_ids")
+    fix_all = payload.get("fix_all", False)
+    return review_service.bulk_fix_reviews(session, review_ids=review_ids, fix_all=fix_all)
+
+

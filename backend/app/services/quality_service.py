@@ -9,7 +9,13 @@ class QualityService:
         has_warnings = any(v.severity == "WARNING" and v.status == "FAIL" for v in validations)
 
         # 1. Brand Normalization Sub-score (20%)
-        brand_score = 100.0 if product.identity.brand.canonical_value and product.identity.brand.canonical_value != "-- Unbranded --" else 50.0
+        is_unbranded = product.identity.brand.canonical_value in ["-- Unbranded --", "-- No Unilog Brand --", "-- No DIB Brand --"]
+        if product.identity.brand.canonical_value and not is_unbranded:
+            brand_score = 100.0
+        elif is_unbranded:
+            brand_score = 90.0
+        else:
+            brand_score = 50.0
 
         # 2. Classification Sub-score (15%)
         class_score = (product.classification.confidence * 100.0) if product.classification.classpath else 0.0
@@ -54,7 +60,7 @@ class QualityService:
         if has_critical or overall < 70.0:
             status = "CRITICAL"
             product.requires_review = True
-        elif has_warnings or overall < 85.0 or product.identity.brand.canonical_value == "-- Unbranded --":
+        elif has_warnings or overall < 85.0:
             status = "NEEDS_REVIEW"
             product.requires_review = True
         elif overall >= 95.0:
@@ -75,7 +81,7 @@ class QualityService:
             "classification": round(class_score, 1),
             "brand": round(brand_score, 1),
             "lov": round(attr_score, 1),
-            "uom": 95.0 if not any(v.rule_id == "UOM_001" and v.status == "FAIL" for v in validations) else 60.0,
+            "uom": 95.0 if not any(v.rule_id in ["UOM_001", "R-UOM-002"] and v.status == "FAIL" for v in validations) else 60.0,
             "descriptions": round(desc_score, 1)
         }
 

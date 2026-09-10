@@ -33,16 +33,30 @@ app = FastAPI(
 )
 
 # CORS Middleware Setup
+cors_origins = list(dict.fromkeys(settings.CORS_ORIGINS + ([settings.FRONTEND_URL] if settings.FRONTEND_URL else [])))
+cors_origins = [o for o in cors_origins if o != "*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=cors_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+from app.api.routes.health import get_health
+
 # Include API Router
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+@app.get("/health", tags=["System"])
+def root_health():
+    return get_health()
+
+@app.get("/", tags=["System"])
+def root():
+    return {"status": "ok", "app": settings.APP_NAME, "version": "1.0.0"}
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

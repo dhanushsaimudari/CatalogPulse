@@ -9,6 +9,9 @@ import { Check, X, Wand2 } from 'lucide-react';
 interface ReviewQueueTableProps {
   items: ReviewItem[];
   selectedIndex: number;
+  selectedReviewIds?: Set<string>;
+  onToggleSelect?: (reviewId: string) => void;
+  onToggleSelectAll?: () => void;
   onSelectItem: (index: number) => void;
   onApprove: (item: ReviewItem) => void;
   onReject: (item: ReviewItem) => void;
@@ -18,16 +21,30 @@ interface ReviewQueueTableProps {
 export const ReviewQueueTable: React.FC<ReviewQueueTableProps> = ({
   items,
   selectedIndex,
+  selectedReviewIds = new Set(),
+  onToggleSelect,
+  onToggleSelectAll,
   onSelectItem,
   onApprove,
   onReject,
   onAutoFix,
 }) => {
+  const allSelected = items.length > 0 && items.every((i) => selectedReviewIds.has(i.review_id));
+
   return (
     <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 shadow-sm transition-colors duration-200">
       <table className="w-full text-xs font-mono text-left">
         <thead className="bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
           <tr>
+            <th className="p-3 w-10 text-center">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={onToggleSelectAll}
+                className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                title="Select / Deselect All"
+              />
+            </th>
             <th className="p-3">Priority</th>
             <th className="p-3">Product MPN</th>
             <th className="p-3">Field</th>
@@ -41,14 +58,27 @@ export const ReviewQueueTable: React.FC<ReviewQueueTableProps> = ({
         <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60">
           {items.map((item, index) => {
             const isSelected = index === selectedIndex;
+            const isChecked = selectedReviewIds.has(item.review_id);
             return (
               <tr
                 key={item.review_id}
                 onClick={() => onSelectItem(index)}
                 className={`cursor-pointer transition-colors ${
-                  isSelected ? 'bg-blue-50 dark:bg-blue-950/40 border-l-2 border-blue-500' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                  isChecked
+                    ? 'bg-blue-50/70 dark:bg-blue-950/60'
+                    : isSelected
+                    ? 'bg-blue-50/40 dark:bg-blue-950/40 border-l-2 border-blue-500'
+                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
                 }`}
               >
+                <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => onToggleSelect && onToggleSelect(item.review_id)}
+                    className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                </td>
                 <td className="p-3">
                   <Badge status={item.severity}>{item.severity}</Badge>
                 </td>
@@ -62,13 +92,13 @@ export const ReviewQueueTable: React.FC<ReviewQueueTableProps> = ({
                 </td>
                 <td className="p-3 text-right">
                   <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                    <Button size="sm" variant="outline" onClick={() => onApprove(item)} className="text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950">
+                    <Button size="sm" variant="outline" onClick={() => onApprove(item)} className="text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950" title="Approve">
                       <Check className="w-3.5 h-3.5" />
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => onAutoFix(item)} className="text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950">
+                    <Button size="sm" variant="outline" onClick={() => onAutoFix(item)} className="text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950" title="Auto-Fix">
                       <Wand2 className="w-3.5 h-3.5" />
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => onReject(item)} className="text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-950">
+                    <Button size="sm" variant="outline" onClick={() => onReject(item)} className="text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-950" title="Reject">
                       <X className="w-3.5 h-3.5" />
                     </Button>
                   </div>

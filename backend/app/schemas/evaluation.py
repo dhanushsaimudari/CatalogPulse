@@ -9,15 +9,23 @@ class DomainScoresSchema(BaseModel):
     uom_compliance: float
     character_compliance: float
     completeness: float
+    identifiers: Optional[float] = 0.0
+    brand_normalization: Optional[float] = 0.0
+    taxonomy_classification: Optional[float] = 0.0
+    attribute_extraction: Optional[float] = 0.0
+    description_generation: Optional[float] = 0.0
+    digital_assets: Optional[float] = 0.0
 
 class DiscrepancyItemSchema(BaseModel):
     mfg_part_num: str
+    mpn: Optional[str] = None
     field_name: str
     category: str
     expected_value: str
     predicted_value: str
     status: str
     auto_fixable: bool
+    fix_available: Optional[bool] = None
 
 class MetricCategoryBreakdownSchema(BaseModel):
     category_name: str
@@ -46,4 +54,6 @@ class EvaluationResultSchema(BaseModel):
     domain_scores: DomainScoresSchema
     category_counts: Dict[str, int]
     discrepancies: List[DiscrepancyItemSchema]
+    processing_coverage: Optional[float] = 100.0
+    ground_truth_available: Optional[bool] = False
     created_at: str

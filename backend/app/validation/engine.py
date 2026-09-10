@@ -50,16 +50,18 @@ class ValidationEngine:
             ))
 
         # 3. Brand Trademark Check
-        if product.identity.brand.canonical_value.endswith("®"):
+        UNBRANDED_SET = {"-- Unbranded --", "-- No Unilog Brand --", "-- No DIB Brand --"}
+        canonical_brand = product.identity.brand.canonical_value or ""
+        if canonical_brand in UNBRANDED_SET or canonical_brand.endswith("®"):
             results.append(ValidationResultSchema(
                 rule_id="R-BRD-001",
                 rule_name="Brand Registered Trademark Attachment",
                 target_field="brand",
                 severity="INFO",
                 status="PASS",
-                message="Canonical brand contains mandatory registered trademark symbol ®.",
-                current_value=product.identity.brand.canonical_value,
-                expected_value=product.identity.brand.canonical_value,
+                message="Brand format complies with trademark requirements or is an authorized unbranded placeholder.",
+                current_value=canonical_brand,
+                expected_value=canonical_brand,
                 auto_fix_available=False
             ))
         else:
@@ -70,8 +72,8 @@ class ValidationEngine:
                 severity="WARNING",
                 status="FAIL",
                 message="Canonical brand missing registered trademark symbol ®.",
-                current_value=product.identity.brand.canonical_value,
-                expected_value=product.identity.brand.canonical_value + "®",
+                current_value=canonical_brand,
+                expected_value=canonical_brand + "®",
                 auto_fix_available=True
             ))
 

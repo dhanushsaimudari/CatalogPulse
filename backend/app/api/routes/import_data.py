@@ -13,7 +13,7 @@ async def import_catalog_file(
 ):
     session = session_manager.get_or_create_session(session_id)
     content_bytes = await file.read()
-    import_id, total_rows, candidates = ingestion_service.process_import(file.filename, content_bytes)
+    import_id, total_rows, candidates = ingestion_service.process_import(file.filename, content_bytes, session=session)
 
     processed_products = processing_service.process_candidates_batch(session, candidates, max_workers=10)
 

@@ -59,7 +59,7 @@ export default function DashboardPage() {
   };
 
   const errorData = [
-    { name: 'Pending Human Review', value: pendingReviews || (totalProds > 0 ? 1 : 0), color: '#f59e0b' },
+    { name: 'Pending Human Review', value: pendingReviews || 0, color: '#f59e0b' },
     { name: 'Blocked Validation Criticals', value: blockedCount || 0, color: '#ef4444' },
     { name: 'Auto-Fixed Rules', value: autoFixedCount || 0, color: '#10b981' },
   ].filter((item) => item.value > 0);

@@ -31,7 +31,9 @@ def get_product(product_id: str, session_id: Optional[str] = Query(None)):
     product = session.get_product(product_id)
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Product {product_id} not found.")
-    return product.model_dump()
+    data = product.model_dump()
+    data["audit_trail"] = session.get_audit_events_for_product(product_id)
+    return data
 
 @router.post("/products/{product_id}/process")
 def process_product(product_id: str, session_id: Optional[str] = Query(None)):

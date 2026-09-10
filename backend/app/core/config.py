@@ -1,6 +1,7 @@
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+from pydantic import field_validator
+from typing import Optional, Any
 
 class Settings(BaseSettings):
     APP_NAME: str = "SORTOLOG IQ"
@@ -17,12 +18,31 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "*"
     ]
     
     # Deployment & URLs
     FRONTEND_URL: str = "http://localhost:3000"
     BACKEND_URL: str = "http://localhost:8000"
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    return [o for o in json.loads(v) if o != "*"]
+                except Exception:
+                    pass
+            return [i.strip() for i in v.split(",") if i.strip() and i.strip() != "*"]
+        if isinstance(v, list):
+            return [str(i).strip() for i in v if str(i).strip() and str(i).strip() != "*"]
+        return [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
 
     # Session Management
     SESSION_TIMEOUT_MINUTES: int = 120

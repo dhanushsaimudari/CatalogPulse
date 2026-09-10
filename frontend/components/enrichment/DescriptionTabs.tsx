@@ -15,13 +15,23 @@ export const DescriptionTabs: React.FC<DescriptionTabsProps> = ({ content }) => 
   const [activeTab, setActiveTab] = useState<'mobile' | 'invoice' | 'short' | 'long' | 'retail' | 'marketing'>('short');
   const [fixedStates, setFixedStates] = useState<Record<string, boolean>>({});
 
+  // ==============================================================================
+  // STANDARDIZED DESCRIPTION CHANNEL CHARACTER LIMITS (matches backend CHAR_LIMITS)
+  // Rationale:
+  // - mobile: 35 chars max (standard mobile handheld/warehouse scanner display)
+  // - invoice: 30 chars max (legacy ERP/EDI billing character boundary)
+  // - short: 50 chars max (POS terminal and condensed catalog index limit)
+  // - long: 800 chars max (technical catalog specification block)
+  // - retail: 150 chars max (retail packaging shelf-tag / item card boundary)
+  // - marketing: 2000 chars max (e-commerce PDP hero narrative)
+  // ==============================================================================
   const tabConfigs = {
-    mobile: { label: 'Mobile Desc', text: content.mobile_desc || '', maxLen: 80, formula: '{Mfr} {Brand}, {Noun}, {Series}, {MPN}, {Mounting}' },
-    invoice: { label: 'Invoice Desc', text: content.invoice_desc || '', maxLen: 40, formula: '{NOUN} {SERIES} {VOLT} {AMP} {SOUND}' },
-    short: { label: 'Short Desc', text: content?.short_desc || '', maxLen: 160, formula: '{Brand®} {Series} {MPN} {Noun} {With}, {Mounting}' },
-    long: { label: 'Long Desc', text: content?.long_desc || content?.long_desc1 || '', maxLen: 500, formula: '{Brand®} {Noun} {With}, {Series}, {Cycles}, {Voltage}, {Amps}' },
-    retail: { label: 'Retail Desc', text: content?.retail_desc || '', maxLen: 100, formula: '{Series} {Noun}, {Mounting}, {Cycles}, {Material}' },
-    marketing: { label: 'Marketing', text: content.marketing_description || '', maxLen: 300, formula: 'PDP Hero Narrative Paragraph' },
+    mobile: { label: 'Mobile Desc', text: content.mobile_desc || '', maxLen: 35, formula: '{Mfr} {Brand}, {Noun}, {Series}, {MPN}' },
+    invoice: { label: 'Invoice Desc', text: content.invoice_desc || '', maxLen: 30, formula: '{NOUN} {SERIES} {VOLT} {AMP} {SOUND}' },
+    short: { label: 'Short Desc', text: content?.short_desc || '', maxLen: 50, formula: '{Brand®} {Series} {MPN} {Noun}' },
+    long: { label: 'Long Desc', text: content?.long_desc || content?.long_desc1 || '', maxLen: 800, formula: '{Brand®} {Noun} {With}, {Series}, {Cycles}, {Voltage}, {Amps}' },
+    retail: { label: 'Retail Desc', text: content?.retail_desc || '', maxLen: 150, formula: '{Series} {Noun}, {Mounting}, {Cycles}, {Material}' },
+    marketing: { label: 'Marketing', text: content.marketing_description || '', maxLen: 2000, formula: 'PDP Hero Narrative Paragraph' },
   };
 
   const current = tabConfigs[activeTab];

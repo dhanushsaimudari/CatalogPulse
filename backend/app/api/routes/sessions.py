@@ -193,6 +193,15 @@ def autofix_session_review(session_id: str, review_id: str):
         raise HTTPException(status_code=404, detail="Review item not found in session.")
     return res.model_dump()
 
+@router.post("/sessions/{session_id}/reviews/{review_id}/edit")
+@router.put("/sessions/{session_id}/reviews/{review_id}/edit")
+def edit_session_review(session_id: str, review_id: str, custom_value: str = Query(..., description="Custom value entered by human reviewer")):
+    session = session_manager.get_or_create_session(session_id)
+    res = review_service.edit_review(session, review_id, custom_value)
+    if not res:
+        raise HTTPException(status_code=404, detail="Review item not found in session.")
+    return res.model_dump()
+
 # --- SESSION EVALUATION & ANALYTICS ---
 
 @router.post("/sessions/{session_id}/evaluation/run")
@@ -229,3 +238,33 @@ def export_session_csv(session_id: str):
             "Content-Disposition": f"attachment; filename=Sortolog_Session_{session.session_id}_Unilog_Delivery.csv"
         }
     )
+
+@router.post("/sessions/{session_id}/export-clean")
+def export_clean_session_csv(session_id: str):
+    session = session_manager.get_or_create_session(session_id)
+    products, _ = session.list_products(limit=10000)
+    csv_content = export_service.export_clean_intelligence_csv(products)
+
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=Sortolog_Session_{session.session_id}_Clean_Intelligence.csv"
+        }
+    )
+
+@router.get("/sessions/{session_id}/products/{product_id}/audit")
+def get_session_product_audit(session_id: str, product_id: str):
+    session = session_manager.get_or_create_session(session_id)
+    events = [
+        e.model_dump() for e in session.audit_events
+        if e.product_id == product_id or e.product_id.startswith(f"{product_id}-")
+    ]
+    return events
+
+@router.post("/sessions/{session_id}/reviews/bulk-fix")
+def bulk_fix_session_reviews(session_id: str, payload: dict = {}):
+    session = session_manager.get_or_create_session(session_id)
+    review_ids = payload.get("review_ids")
+    fix_all = payload.get("fix_all", False)
+    return review_service.bulk_fix_reviews(session, review_ids=review_ids, fix_all=fix_all)

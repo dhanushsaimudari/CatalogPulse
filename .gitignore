@@ -6,6 +6,8 @@
 .env.production.local
 *.pem
 *.key
+credentials.json
+*.credentials
 
 # Python Byte-code & Cache
 __pycache__/

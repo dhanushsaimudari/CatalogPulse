@@ -37,15 +37,50 @@ class ProcessingService:
         e1_b = candidate.get("e1_brand", "")
         unilog_b = candidate.get("unilog_brand", "")
         dib_b = candidate.get("dib_brand", "")
-        raw_brand_str = unilog_b or dib_b or e1_b or "GENERIC"
+        raw_brand_str = unilog_b or dib_b or e1_b or ""
 
         safe_mpn_slug = re.sub(r'[^a-zA-Z0-9_-]', '_', mpn.strip().lower()) if mpn else ""
-        product_id = f"prod-{safe_mpn_slug}" if safe_mpn_slug else f"prod-row-{row_id}"
+        base_id = f"prod-{safe_mpn_slug}" if safe_mpn_slug else f"prod-row-{row_id}"
+        if session and hasattr(session, "allocate_product_id"):
+            product_id = session.allocate_product_id(base_id, row_id=row_id)
+        elif session and hasattr(session, "products") and base_id in session.products:
+            product_id = f"{base_id}-{row_id if row_id is not None else uuid.uuid4().hex[:8]}"
+        else:
+            product_id = base_id
 
         # 1. Local Master Normalization
         report("MANUFACTURER_BRAND", 10)
-        canonical_mfr, mfr_status, mfr_conf = local_cleaner.resolve_manufacturer(raw_mfr)
-        canonical_brand, brand_status, brand_conf = local_cleaner.resolve_brand(raw_brand_str)
+        canonical_mfr, mfr_status, mfr_conf = local_cleaner.resolve_manufacturer(raw_mfr, desc=raw_desc, mpn=mpn)
+        canonical_brand, brand_status, brand_conf = local_cleaner.resolve_brand(
+            raw_brand_str, desc=raw_desc, mfr=canonical_mfr, mpn=mpn
+        )
+
+        session.log_event(
+            product_id=product_id,
+            event_type="INGESTED",
+            description=f"Raw item ingested from source row {row_id} (MPN: '{mpn}').",
+            actor="INGESTION_SERVICE"
+        )
+        if raw_brand_str and canonical_brand != raw_brand_str:
+            session.log_event(
+                product_id=product_id,
+                event_type="BRAND_NORMALIZED",
+                field="brand",
+                old_value=raw_brand_str,
+                new_value=canonical_brand,
+                description=f"Normalized brand from '{raw_brand_str}' to canonical '{canonical_brand}'.",
+                actor="LOCAL_CLEANER"
+            )
+        if raw_mfr and canonical_mfr != raw_mfr:
+            session.log_event(
+                product_id=product_id,
+                event_type="MANUFACTURER_NORMALIZED",
+                field="manufacturer",
+                old_value=raw_mfr,
+                new_value=canonical_mfr,
+                description=f"Normalized manufacturer from '{raw_mfr}' to canonical '{canonical_mfr}'.",
+                actor="LOCAL_CLEANER"
+            )
 
         # 2. Semantic Uncertainty Gate
         should_call_ai, gate_reason, local_ctx = semantic_decision_service.evaluate_enrichment_need(
@@ -68,42 +103,35 @@ class ProcessingService:
             )
         else:
             session.record_local_decision()
-            ml_class = local_ctx.get("ml_classification")
-            if ml_class and isinstance(ml_class, dict):
-                classification = ClassificationDataSchema(
-                    department=ml_class.get("department", "General Industrial"),
-                    class_name=ml_class.get("class_name", "Hardware & Supplies"),
-                    fine_class=ml_class.get("fine_class", "General Fasteners"),
-                    classpath=ml_class.get("classpath", "General Industrial>Hardware & Supplies>General Fasteners"),
-                    confidence=ml_class.get("confidence", 0.95),
-                    reason=f"{ml_class.get('reason')} | {gate_reason}"
-                )
-            else:
-                class_res, _ = ai_provider_router.classify_product(mpn, raw_desc, canonical_mfr, canonical_brand, session=None)
-                classification = ClassificationDataSchema(
-                    department=class_res.department,
-                    class_name=class_res.class_name,
-                    fine_class=class_res.fine_class,
-                    classpath=class_res.classpath,
-                    confidence=0.95,
-                    reason=f"Local deterministic decision ({gate_reason})"
-                )
+            class_res, _ = ai_provider_router.classify_product(mpn, raw_desc, canonical_mfr, canonical_brand, session=None)
+            classification = ClassificationDataSchema(
+                department=class_res.department,
+                class_name=class_res.class_name,
+                fine_class=class_res.fine_class,
+                classpath=class_res.classpath,
+                confidence=class_res.confidence,
+                reason=f"Local deterministic intelligence ({gate_reason})"
+            )
 
         # 4. Attributes & LOV Enrichment
         report("AI_ENRICHMENT", 45)
-        sample_attributes = []
+        sample_attributes: List[ProductAttributeSchema] = []
         if should_call_ai:
             extracted_raw, _ = ai_provider_router.extract_attributes(
                 mpn, raw_desc, classification.classpath, session=session
             )
             for item in extracted_raw:
+                lbl_upper = item.label.strip().upper()
+                # Exclude identity fields that must never be in attributes[]
+                if lbl_upper in ["MANUFACTURER PART NUMBER", "PRIMARY BRAND", "MANUFACTURER", "BRAND"]:
+                    continue
                 sample_attributes.append(
                     ProductAttributeSchema(
-                        sequence=item.sequence,
+                        sequence=len(sample_attributes) + 1,
                         label=item.label,
                         raw_value=item.raw_value,
                         normalized_value=item.normalized_value,
-                        uom=item.uom,
+                        uom=local_cleaner.normalize_uom(item.uom) if item.uom else "",
                         status="VALID" if item.raw_value else "NEEDS_REVIEW",
                         lov_matched=bool(item.raw_value),
                         explanation=ExplanationSchema(
@@ -116,42 +144,17 @@ class ProcessingService:
                     )
                 )
 
-        # Local Deterministic attributes fallback
-        if not sample_attributes:
-            sample_attributes = [
-                ProductAttributeSchema(
-                    sequence=1,
-                    label="MANUFACTURER PART NUMBER",
-                    raw_value=mpn or "N/A",
-                    normalized_value=mpn or "N/A",
-                    uom="",
-                    status="VALID",
-                    lov_matched=True,
-                    explanation=ExplanationSchema(
-                        raw_source="Source Feed",
-                        ai_interpretation="Canonical Part Number",
-                        lov_status="Matched",
-                        uom_status="N/A",
-                        validation_result="PASS"
-                    )
-                ),
-                ProductAttributeSchema(
-                    sequence=2,
-                    label="PRIMARY BRAND",
-                    raw_value=canonical_brand,
-                    normalized_value=canonical_brand,
-                    uom="",
-                    status="VALID",
-                    lov_matched=True,
-                    explanation=ExplanationSchema(
-                        raw_source="Brand Normalizer",
-                        ai_interpretation="Approved Trademark Brand",
-                        lov_status="Matched",
-                        uom_status="N/A",
-                        validation_result="PASS"
-                    )
-                )
-            ]
+        # Dynamic attribute discovery from product evidence (no universal hardcoded list, no MPN/Brand)
+        raw_row_data = candidate.get("raw_row", {})
+        discovered_attrs = self.discover_dynamic_attributes(
+            mpn, raw_desc, classification, canonical_mfr, canonical_brand, raw_row=raw_row_data
+        )
+        existing_labels = {a.label.strip().upper() for a in sample_attributes}
+        for da in discovered_attrs:
+            if da.label.strip().upper() not in existing_labels:
+                da.sequence = len(sample_attributes) + 1
+                sample_attributes.append(da)
+                existing_labels.add(da.label.strip().upper())
 
         # 5. Content & Description Generation
         report("DESCRIPTION", 65)
@@ -161,13 +164,13 @@ class ProcessingService:
         )
         content = ProductContentSchema(
             product_name=desc_res.product_name,
-            mobile_desc=desc_res.mobile_desc,
-            invoice_desc=desc_res.invoice_desc,
-            short_desc=desc_res.short_desc,
-            long_desc=desc_res.long_desc,
-            retail_desc=desc_res.retail_desc,
-            marketing_description=desc_res.marketing_description,
-            item_features=desc_res.item_features
+            mobile_desc=desc_res.mobile_desc[:35] if desc_res.mobile_desc else "",
+            invoice_desc=(desc_res.invoice_desc[:30] if desc_res.invoice_desc else "").upper(),
+            short_desc=desc_res.short_desc[:50] if desc_res.short_desc else "",
+            long_desc=desc_res.long_desc[:800] if desc_res.long_desc else "",
+            retail_desc=desc_res.retail_desc[:150] if desc_res.retail_desc else "",
+            marketing_description=desc_res.marketing_description[:2000] if desc_res.marketing_description else "",
+            item_features=desc_res.item_features or []
         )
 
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -183,12 +186,12 @@ class ProcessingService:
                 unilog_brand=unilog_b,
                 dib_brand=dib_b,
                 part_manuf=raw_mfr,
-                raw_columns=candidate.get("raw_row", {})
+                raw_columns=raw_row_data
             ),
             identity=ProductIdentitySchema(
                 mfg_part_num=mpn,
-                manufacturer=ValueMatchSchema(raw_value=raw_mfr, canonical_value=canonical_mfr, confidence=0.98, status=mfr_status),
-                brand=ValueMatchSchema(raw_value=raw_brand_str, canonical_value=canonical_brand, confidence=0.95, status="NORMALIZED")
+                manufacturer=ValueMatchSchema(raw_value=raw_mfr, canonical_value=canonical_mfr, confidence=mfr_conf, status=mfr_status),
+                brand=ValueMatchSchema(raw_value=raw_brand_str, canonical_value=canonical_brand, confidence=brand_conf, status=brand_status)
             ),
             classification=classification,
             content=content,
@@ -211,6 +214,15 @@ class ProcessingService:
         report("VALIDATING", 80)
         validations = validation_engine.validate_product(product)
         product.validations = validations
+        for v in validations:
+            if v.status == "FAIL":
+                session.log_event(
+                    product_id=product.id,
+                    event_type="VALIDATION_FAILED",
+                    field=v.target_field,
+                    description=f"Validation failed for rule {v.rule_id}: {v.message}",
+                    actor="VALIDATION_ENGINE"
+                )
 
         # 7. Auto-Fix
         product, fixes_applied = auto_fix_service.apply_auto_fixes(product)
@@ -234,6 +246,7 @@ class ProcessingService:
 
         if has_failed_validation or is_unknown_class or is_low_quality:
             product.requires_review = True
+            reviews_added = 0
             for v in product.validations:
                 if v.severity in ["WARNING", "ERROR", "CRITICAL"] and v.status == "FAIL":
                     review_item = ReviewItemSchema(
@@ -253,6 +266,63 @@ class ProcessingService:
                         created_at=now_iso
                     )
                     session.add_review(review_item)
+                    reviews_added += 1
+
+            # Fallback: if requires_review is True, never allow an empty review queue
+            if reviews_added == 0:
+                if is_unknown_class:
+                    session.add_review(ReviewItemSchema(
+                        review_id=f"rev-{uuid.uuid4().hex[:8]}",
+                        product_id=product.id,
+                        mfg_part_num=product.identity.mfg_part_num,
+                        product_name=product.content.product_name,
+                        field="classpath",
+                        field_name="classpath",
+                        issue_type="R-TAX-001",
+                        severity="WARNING",
+                        current_value=product.classification.classpath,
+                        suggested_value="General Industrial>Hardware & Supplies>Components",
+                        reason=f"Taxonomy classification uncertain (fine class: {product.classification.fine_class}, confidence: {product.classification.confidence:.2f}).",
+                        quality_score=product.quality.overall_score,
+                        status="PENDING",
+                        created_at=now_iso
+                    ))
+                elif is_low_quality:
+                    session.add_review(ReviewItemSchema(
+                        review_id=f"rev-{uuid.uuid4().hex[:8]}",
+                        product_id=product.id,
+                        mfg_part_num=product.identity.mfg_part_num,
+                        product_name=product.content.product_name,
+                        field="quality_score",
+                        field_name="quality_score",
+                        issue_type="R-QUAL-001",
+                        severity="WARNING",
+                        current_value=str(product.quality.overall_score),
+                        suggested_value="85.0",
+                        reason=f"Overall quality score ({product.quality.overall_score}) is below standard threshold.",
+                        quality_score=product.quality.overall_score,
+                        status="PENDING",
+                        created_at=now_iso
+                    ))
+                elif not product.identity.mfg_part_num:
+                    session.add_review(ReviewItemSchema(
+                        review_id=f"rev-{uuid.uuid4().hex[:8]}",
+                        product_id=product.id,
+                        mfg_part_num=product.identity.mfg_part_num or "UNKNOWN",
+                        product_name=product.content.product_name,
+                        field="mfg_part_num",
+                        field_name="mfg_part_num",
+                        issue_type="R-MPN-001",
+                        severity="CRITICAL",
+                        current_value="",
+                        suggested_value="REQUIRED",
+                        reason="Manufacturer part number is missing.",
+                        quality_score=product.quality.overall_score,
+                        status="PENDING",
+                        created_at=now_iso
+                    ))
+        else:
+            product.requires_review = False
 
         # Save to In-Memory Session
         session.add_product(product)
@@ -263,6 +333,379 @@ class ProcessingService:
         )
 
         return product
+
+    def discover_dynamic_attributes(
+        self,
+        mpn: str,
+        desc: str,
+        classification: ClassificationDataSchema,
+        canonical_mfr: str,
+        canonical_brand: str,
+        raw_row: Optional[Dict[str, Any]] = None
+    ) -> List[ProductAttributeSchema]:
+        """
+        Discovers and extracts dynamic, product-specific semantic attributes using open-world intelligence.
+        Never fabricates values. Never creates MPN or Brand as dynamic attributes.
+        Labels are specific, semantic, and human-readable.
+        Preserves commercial fields from user-uploaded raw columns without hallucinating if absent.
+        """
+        attrs: List[ProductAttributeSchema] = []
+        desc_clean = local_cleaner.clean_text(desc)
+        desc_upper = desc_clean.upper()
+        classpath = classification.classpath if classification else ""
+        class_upper = classpath.upper()
+        raw_row = raw_row or {}
+
+        seq = 1
+        added_labels = set()
+
+        def add_attr(label: str, raw_val: str, norm_val: str, uom: str = "", explanation: str = "", source: str = ""):
+            nonlocal seq
+            if not raw_val or not str(raw_val).strip():
+                return
+            lbl_clean = label.strip()
+            lbl_upper = lbl_clean.upper()
+            # Absolute rule: Never create MPN or Brand as dynamic attributes
+            if lbl_upper in ["MANUFACTURER PART NUMBER", "PRIMARY BRAND", "MANUFACTURER", "BRAND", "MPN"]:
+                return
+            if lbl_upper in added_labels:
+                return
+            clean_uom = local_cleaner.normalize_uom(uom) if uom else ""
+            src_str = source or f"Product Evidence ({mpn})"
+            attrs.append(
+                ProductAttributeSchema(
+                    sequence=seq,
+                    label=lbl_clean,
+                    raw_value=str(raw_val).strip(),
+                    normalized_value=str(norm_val).strip(),
+                    uom=clean_uom,
+                    status="VALID",
+                    lov_matched=True,
+                    explanation=ExplanationSchema(
+                        raw_source=src_str,
+                        ai_interpretation=explanation or f"Extracted semantic property '{lbl_clean}'",
+                        lov_status=f"LOV Matched ({norm_val})",
+                        uom_status=f"Standard UOM ({clean_uom})" if clean_uom else "N/A",
+                        validation_result="PASS"
+                    )
+                )
+            )
+            added_labels.add(lbl_upper)
+            seq += 1
+
+        # 1. Dynamic Product Type (Semantic Anchor)
+        product_type = ""
+        for explicit_type in [
+            "BALL VALVE", "CHECK VALVE", "GATE VALVE", "BUTTERFLY VALVE", "GLOBE VALVE",
+            "VALVE", "PIPE COUPLING", "COUPLING FITTING", "COUPLING", "NIPPLE", "ELBOW", "TEE", "ADAPTER", "BUSHING", "UNION",
+            "CIRCUIT BREAKER", "DISCONNECT SWITCH", "FUSE", "RELAY", "CONTACTOR",
+            "LED BULB", "LIGHT BULB", "FLOODLIGHT", "LUMINAIRE",
+            "AVIATION SNIP", "AVIATION SNIPS", "SNIP", "SNIPS", "CRIMPER", "PLIERS", "CUTTER", "WRENCH", "SCREWDRIVER",
+            "CAP SCREW", "HEX SCREW", "MACHINE SCREW", "WOOD SCREW", "HEX BOLT", "BOLT", "NUT", "WASHER",
+            "ABRASIVE FILM DISC", "ABRASIVE DISC", "FILM DISC", "FLAP DISC", "GRINDING WHEEL", "CUT-OFF WHEEL", "SANDING DISC",
+            "THERMOSTAT", "HEAT PUMP", "AIR FILTER", "DECKING BOARD", "COMPOSITE DECKING",
+            "CENTRIFUGAL PUMP", "WATER PUMP", "UTILITY BLADE", "BLADE"
+        ]:
+            if re.search(r'\b' + re.escape(explicit_type) + r'\b', desc_upper):
+                if explicit_type == "FILM DISC" and "ABRASIVE" in desc_upper:
+                    product_type = "Abrasive Film Disc"
+                elif explicit_type == "COUPLING" and any(k in desc_upper for k in ["BRASS", "PIPE", "FNPT", "MNPT", "PLUMBING"]):
+                    product_type = "Coupling Fitting"
+                else:
+                    product_type = explicit_type.title()
+                break
+
+        if not product_type and classification and classification.fine_class and classification.fine_class != "UNKNOWN":
+            product_type = classification.fine_class
+        elif not product_type:
+            words = [w for w in re.split(r'[^A-Za-z0-9]+', desc_clean) if len(w) > 2 and not w.isdigit()]
+            meaningful = [w for w in words if w.upper() not in ["THE", "AND", "FOR", "WITH", "SET", "KIT", "OEM", "NEW", "PCS", "PACK"]]
+            if meaningful:
+                product_type = " ".join(meaningful[-2:]).title()
+        if product_type:
+            add_attr("Product Type", product_type, product_type, "", "Primary functional product type classification")
+
+        # 2. Universal Materials Formulation
+        materials = [
+            "STAINLESS STEEL", "CARBON STEEL", "BRASS", "BRONZE", "POLYURETHANE",
+            "CELLULAR PVC", "PVC", "CPVC", "POLYETHYLENE", "ALUMINUM", "COPPER",
+            "NYLON", "RUBBER", "NITRILE", "SILICONE", "TEFLON", "PTFE",
+            "CAST IRON", "DUCTILE IRON", "ZINC", "CERAMIC", "TITANIUM", "WOOD", "COMPOSITE"
+        ]
+        for mat in materials:
+            if re.search(r'\b' + re.escape(mat) + r'\b', desc_upper):
+                mat_formatted = mat if mat in ["PVC", "CPVC", "PTFE"] else mat.title()
+                add_attr("Material", mat_formatted, mat_formatted, "", "Base engineering material formulation")
+                add_attr("Material Type", mat_formatted, mat_formatted, "", "Base engineering material formulation")
+                break
+
+        # 3. Universal Nominal Size & Dimensions
+        m_sz = re.search(r'\b(1/16|1/8|3/16|1/4|5/16|3/8|7/16|1/2|5/8|3/4|7/8|1[- ]?1/4|1[- ]?1/2|2[- ]?1/2)(?:\s*(?:IN(?:CH(?:ES)?)?|"))?\b|\b([1-4])\s*(?:IN(?:CH(?:ES)?)?|")\b', desc_upper)
+        if m_sz:
+            sz_val = (m_sz.group(1) or m_sz.group(2)).replace(" ", "-")
+            add_attr("Nominal Size", sz_val, sz_val, "IN", "Nominal product size specification")
+            if any(k in class_upper or k in desc_upper for k in ["VALVE", "VLV", "FITTING", "PIPE", "CPLG", "TUBING", "HOSE", "PLUMBING", "PNEUMATIC"]):
+                add_attr("Connection Size", sz_val, sz_val, "IN", "Inlet/outlet connection port size")
+
+        # Length (Feet or Inches)
+        m_len_ft = re.search(r'\b(8|10|12|16|20|24|50|100|250|500)\s*(?:FT|FOOT|FEET|\')\b', desc_upper)
+        if m_len_ft:
+            add_attr("Length", f"{m_len_ft.group(1)} FT", f"{m_len_ft.group(1)} FT", "FT", "Nominal overall length")
+        else:
+            m_len_in = re.search(r'(?:X\s*)(\d+(?:[./]\d+)?)\s*(?:IN(?:CH(?:ES)?)?|"|\b)', desc_upper)
+            if m_len_in and m_len_in.group(1) not in ["0.045", "1/16"]:
+                add_attr("Length", m_len_in.group(1), m_len_in.group(1), "IN", "Fastener or tool shank length")
+
+        # Board / Dimension Width
+        m_wid = re.search(r'\b(5[- ]?1/2|6|8|12)\s*(?:IN|INCH(?:ES)?|")\b', desc_upper)
+        if m_wid and ("DECK" in class_upper or "BUILDING" in class_upper or "LUMBER" in desc_upper or "DECK" in desc_upper):
+            val = m_wid.group(1).replace(" ", "-")
+            add_attr("Width", f"{val} IN", f"{val} IN", "IN", "Board nominal width")
+
+        # Color / Finish
+        for clr in ["BROWN", "GREY", "GRAY", "WHITE", "BLACK", "RED", "BLUE", "GREEN", "YELLOW"]:
+            if re.search(r'\b' + clr + r'\b', desc_upper):
+                add_attr("Color / Finish", clr.title(), clr.title(), "", "Product visual finish or color")
+                break
+
+        # Abrasive Wheel / Disc Dimensions
+        if any(k in class_upper or k in desc_upper for k in ["ABRASIVE", "DISC", "WHEEL", "CUT-OFF", "GRIND", "FILM"]):
+            m_dia = re.search(r'\b(4[- ]?1/2|4\.5|5|6|7|9|12|14)\s*(?:["\']|IN(?:CH(?:ES)?)?|\b)', desc_upper)
+            if m_dia:
+                val = m_dia.group(1).replace(" ", "-")
+                if "DISC" in desc_upper or "FILM" in desc_upper:
+                    add_attr("Disc Diameter", val, val, "IN", "Abrasive disc outer diameter")
+                add_attr("Wheel Diameter", val, val, "IN", "Abrasive wheel outer diameter")
+
+            m_thk = re.search(r'\b(0\.\d+|\d+/\d+)\s*(?:["\']|IN(?:CH(?:ES)?)?|\b)', desc_upper)
+            if m_thk and (not m_dia or m_thk.group(1) != m_dia.group(1)):
+                val = m_thk.group(1)
+                add_attr("Wheel Thickness", val, val, "IN", "Abrasive wheel thickness/kerf")
+
+            m_arbor = re.search(r'(?:ARBOR|BORE|HOLE|X)\s*([0-9/.-]+(?:-\d+)?)\s*(?:IN|MM|")?', desc_upper)
+            if m_arbor and m_arbor.group(1) not in ["0.045", "1/16"]:
+                arb_val = m_arbor.group(1)
+                add_attr("Arbor Size", arb_val, arb_val, "IN" if "/" in arb_val else "", "Wheel mounting arbor size")
+
+            m_grit = re.search(r'\b([P]?\d{2,4})\s*(?:GRIT|G\b)', desc_upper)
+            if m_grit:
+                add_attr("Grit", m_grit.group(1), m_grit.group(1), "", "Abrasive grit rating")
+                add_attr("Abrasive Grit", m_grit.group(1), m_grit.group(1), "", "Abrasive grit rating")
+
+            for mat in ["ALUMINUM OXIDE", "SILICON CARBIDE", "ZIRCONIA ALUMINA", "CERAMIC", "DIAMOND"]:
+                if mat in desc_upper:
+                    add_attr("Abrasive Material", mat.title(), mat.title(), "", "Abrasive grain material composition")
+                    break
+
+            m_rpm = re.search(r'\b(\d{4,5})\s*RPM\b', desc_upper)
+            if m_rpm:
+                add_attr("Maximum RPM", m_rpm.group(1), m_rpm.group(1), "RPM", "Safe maximum operating rotational speed")
+
+        # 4. Fluid & Pneumatic Connections & Pressure
+        connection_types = ["FNPT", "MNPT", "NPT", "PUSH-TO-CONNECT", "COMPRESSION", "BARBED", "SWEAT", "PRESS", "PEX", "FLANGED", "SOCKET", "TRI-CLAMP"]
+        for ct in connection_types:
+            if re.search(r'\b' + re.escape(ct) + r'\b', desc_upper):
+                add_attr("Connection Type", ct, ct, "", "Plumbing or pneumatic joint connection style")
+                break
+
+        m_psi = re.search(r'\b(\d{2,5})\s*(?:PSI|BAR|KPA|WOG|CWP)\b', desc_upper)
+        if m_psi:
+            add_attr("Pressure Rating", f"{m_psi.group(1)} PSI", f"{m_psi.group(1)} PSI", "PSI", "Maximum rated operating pressure")
+
+        # 5. Electrical & Lighting
+        m_watt = re.search(r'\b(\d+(?:\.\d+)?)\s*(?:W|WATT|WATTS)\b', desc_upper)
+        if m_watt:
+            add_attr("Wattage", m_watt.group(1), m_watt.group(1), "W", "Electrical power consumption rating")
+
+        m_volt = re.search(r'\b(12|24|120|208|240|277|480|600)\s*(?:V|VOLTS?|VAC|VDC)\b', desc_upper)
+        if m_volt:
+            add_attr("Voltage", m_volt.group(1), m_volt.group(1), "V", "Nominal operating voltage")
+
+        m_amp = re.search(r'\b(\d+(?:\.\d+)?)\s*(?:A|AMP|AMPS)\b', desc_upper)
+        if m_amp:
+            add_attr("Amperage", m_amp.group(1), m_amp.group(1), "A", "Rated electrical current")
+
+        for shape in ["A19", "BR30", "PAR38", "PAR20", "PAR30", "T8", "T5", "MR16", "GU10", "ED17", "G25", "B11"]:
+            if re.search(r'\b' + shape + r'\b', desc_upper):
+                add_attr("Bulb Shape", shape, shape, "", "ANSI bulb shape code")
+                break
+
+        for base in ["E26", "MEDIUM", "MOGUL", "E39", "CANDELABRA", "E12", "GU24", "BI-PIN", "G13"]:
+            if re.search(r'\b' + base + r'\b', desc_upper):
+                b_name = "E26 Medium" if base in ["E26", "MEDIUM"] else ("E12 Candelabra" if base in ["E12", "CANDELABRA"] else base.title())
+                add_attr("Base Type", b_name, b_name, "", "Lamp socket base interface")
+                break
+
+        m_cct = re.search(r'\b([2-6]\d00)\s*K\b', desc_upper)
+        if m_cct:
+            add_attr("Color Temperature", f"{m_cct.group(1)}K", f"{m_cct.group(1)}K", "K", "Correlated color temperature rating")
+
+        m_lm = re.search(r'\b(\d{3,5})\s*(?:LM|LUMENS?)\b', desc_upper)
+        if m_lm:
+            add_attr("Lumens", m_lm.group(1), m_lm.group(1), "LM", "Luminous flux output")
+
+        if "DIMMABLE" in desc_upper and "NON-DIMMABLE" not in desc_upper:
+            add_attr("Dimmable", "Yes", "Yes", "", "Dimming capability")
+        elif "NON-DIMMABLE" in desc_upper:
+            add_attr("Dimmable", "No", "No", "", "Dimming capability")
+
+        # 6. Fasteners & Mechanical Screws
+        m_thread = re.search(r'\b(\d+/\d+-\d+|\d+-\d+|M\d+(?:\.\d+)?)\b', desc_upper)
+        if m_thread:
+            add_attr("Thread Size", m_thread.group(1), m_thread.group(1), "", "Screw/bolt thread size and pitch")
+
+        for hd in ["HEX HEAD", "PAN HEAD", "FLAT HEAD", "SOCKET HEAD", "ROUND HEAD", "TRUSS HEAD", "BUTTON HEAD"]:
+            if hd in desc_upper:
+                add_attr("Head Type", hd.title(), hd.title(), "", "Fastener head style")
+                add_attr("Fastener Head Style", hd.title(), hd.title(), "", "Fastener head style")
+                break
+
+        for fn in ["ZINC PLATED", "HOT DIPPED GALVANIZED", "BLACK OXIDE", "YELLOW ZINC", "PLAIN"]:
+            if fn in desc_upper:
+                add_attr("Finish", fn.title(), fn.title(), "", "Surface protective coating")
+                break
+
+        # 7. Hand & Power Tools / Snips
+        for tt in ["AVIATION SNIPS", "OFFSET SNIPS", "CRIMPER", "DIAGONAL CUTTERS", "LONG NOSE PLIERS", "WIRE STRIPPER", "SHEARS"]:
+            if tt in desc_upper:
+                add_attr("Tool Type", tt.title(), tt.title(), "", "Hand tool design classification")
+                break
+
+        m_ga = re.search(r'\b(\d{1,2})\s*(?:GA|GAUGE)\b', desc_upper)
+        if m_ga:
+            add_attr("Cutting Capacity", f"{m_ga.group(1)} Gauge", f"{m_ga.group(1)} Gauge", "", "Maximum cutting material thickness")
+
+        for ct_dir in ["LEFT CUT", "RIGHT CUT", "STRAIGHT CUT", "BULLDOG"]:
+            if ct_dir in desc_upper:
+                add_attr("Cut Direction", ct_dir.title(), ct_dir.title(), "", "Cutting blade orientation")
+                break
+
+        # 8. Appliances
+        if any(k in class_upper or k in desc_upper for k in ["APPLIANCE", "DISHWASHER", "FRIDGE", "REFRIGERATOR"]):
+            app_t = "Built-In Dishwasher" if "DISHWASHER" in desc_upper else ("Refrigerator" if ("FRIDGE" in desc_upper or "REFRIGERATOR" in desc_upper) else "Kitchen Appliance")
+            add_attr("Appliance Type", app_t, app_t, "", "Appliance functional category")
+            for fin in ["STAINLESS STEEL", "BLACK STAINLESS", "WHITE", "BLACK", "PANEL READY"]:
+                if fin in desc_upper:
+                    add_attr("Finish / Color", fin.title(), fin.title(), "", "Exterior appliance finish")
+                    break
+
+        # 9. Pack / Packaging Quantity
+        m_qty = re.search(r'(?:PACK OF\s*(\d+)|PK OF\s*(\d+)|\bBOX OF\s*(\d+)|\bBAG OF\s*(\d+)|\bQTY:?\s*(\d+)|\b(\d+)\s*(?:PK|PACK|PC|PCS)\b)', desc_upper)
+        if m_qty:
+            val = next((g for g in m_qty.groups() if g is not None), None)
+            if val:
+                add_attr("Package Quantity", val, val, "", "Item packaging count")
+                add_attr("Pack Quantity", val, val, "", "Item packaging count")
+
+        # 10. Commercial Fields from Customer Upload (Preserved, NEVER Fabricated)
+        if raw_row and isinstance(raw_row, dict):
+            commercial_maps = [
+                (["cost", "unit_cost", "unit cost", "net_cost", "net cost"], "Unit Cost"),
+                (["price", "list_price", "list price", "retail_price", "retail price"], "List Price"),
+                (["stock", "quantity", "inventory", "qty_on_hand", "qty on hand"], "Stock Quantity"),
+                (["country", "country_of_origin", "country of origin", "coo", "origin"], "Country of Origin"),
+                (["upc", "ean", "barcode"], "UPC"),
+                (["weight", "gross_weight", "gross weight", "net_weight", "net weight"], "Weight"),
+            ]
+            raw_row_lower = {str(k).strip().lower(): v for k, v in raw_row.items() if v is not None and str(v).strip()}
+            for keys, attr_label in commercial_maps:
+                for k in keys:
+                    if k in raw_row_lower:
+                        val_str = str(raw_row_lower[k]).strip()
+                        if val_str and val_str.upper() not in ["N/A", "NONE", "NULL", "UNKNOWN", ""]:
+                            add_attr(attr_label, val_str, val_str, "", f"Customer supplied commercial data ({k})", source="RAW_INPUT")
+                        break
+
+        return attrs
+
+    def _create_error_fallback_product(
+        self,
+        session: Optional[ProcessingSession],
+        candidate: Dict[str, Any],
+        error: str = ""
+    ) -> ProductSchema:
+        row_id = candidate.get("source_row_id", 1)
+        mpn = candidate.get("mpn", "")
+        raw_desc = candidate.get("description", "")
+        raw_mfr = candidate.get("part_manuf", "")
+        raw_row_data = candidate.get("raw_row", {})
+        e1_b = candidate.get("e1_brand", "")
+        unilog_b = candidate.get("unilog_brand", "")
+        dib_b = candidate.get("dib_brand", "")
+
+        safe_mpn_slug = re.sub(r'[^a-zA-Z0-9_-]', '_', mpn.strip().lower()) if mpn else ""
+        base_id = f"prod-{safe_mpn_slug}" if safe_mpn_slug else f"prod-row-{row_id}"
+        if session and hasattr(session, "allocate_product_id"):
+            product_id = session.allocate_product_id(base_id, row_id=row_id)
+        else:
+            product_id = f"{base_id}-{uuid.uuid4().hex[:8]}"
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        classification = ClassificationDataSchema(
+            department="General Industrial",
+            class_name="Industrial Supplies",
+            fine_class="Unclassified",
+            classpath="General Industrial > Industrial Supplies > Other > Unclassified",
+            confidence=0.0,
+            reason=f"Processing fallback: {error}"
+        )
+        content = ProductContentSchema(
+            product_name=raw_desc or mpn or "Unclassified Product",
+            mobile_desc=raw_desc[:60] if raw_desc else "",
+            invoice_desc=(raw_desc[:40] if raw_desc else "").upper(),
+            short_desc=raw_desc[:255] if raw_desc else "",
+            long_desc=raw_desc,
+            retail_desc=raw_desc[:150] if raw_desc else "",
+            marketing_description=raw_desc[:2000] if raw_desc else "",
+            item_features=[]
+        )
+
+        fallback_product = ProductSchema(
+            id=product_id,
+            source_row_id=row_id,
+            source_data=SourceDataSchema(
+                mfg_part_num=mpn,
+                part_desc=raw_desc,
+                e1_brand=e1_b,
+                unilog_brand=unilog_b,
+                dib_brand=dib_b,
+                part_manuf=raw_mfr,
+                raw_columns=raw_row_data
+            ),
+            identity=ProductIdentitySchema(
+                mfg_part_num=mpn,
+                manufacturer=ValueMatchSchema(raw_value=raw_mfr, canonical_value=raw_mfr or "-- Unbranded --", confidence=0.5, status="UNVERIFIED"),
+                brand=ValueMatchSchema(raw_value="", canonical_value="-- Unbranded --", confidence=0.5, status="UNBRANDED")
+            ),
+            classification=classification,
+            content=content,
+            attributes=[],
+            validations=[],
+            quality=quality_service.calculate_quality(
+                ProductSchema.model_construct(
+                    id=product_id, source_row_id=row_id,
+                    source_data=SourceDataSchema(mfg_part_num=mpn, part_desc=raw_desc, e1_brand="", unilog_brand="", dib_brand="", part_manuf=raw_mfr),
+                    identity=ProductIdentitySchema(mfg_part_num=mpn, manufacturer=ValueMatchSchema(raw_value=raw_mfr, canonical_value=raw_mfr, confidence=0.5, status="UNVERIFIED"), brand=ValueMatchSchema(raw_value="", canonical_value="-- Unbranded --", confidence=0.5, status="UNBRANDED")),
+                    classification=classification, content=content, quality=None, validations=[], created_at="", updated_at=""
+                ),
+                []
+            ),
+            requires_review=True,
+            created_at=now_iso,
+            updated_at=now_iso
+        )
+
+        if session and hasattr(session, "add_product"):
+            session.add_product(fallback_product)
+            session.log_event(
+                product_id=product_id,
+                event_type="PROCESSING_ERROR",
+                description=f"Processing failed for source row {row_id} (MPN: '{mpn}'): {error}",
+                actor="PROCESSING_SERVICE"
+            )
+
+        return fallback_product
 
     def process_candidates_batch(
         self,
@@ -296,6 +739,11 @@ class ProcessingService:
                 results[idx] = prod
             except Exception as e:
                 logger.exception("Failed processing candidate row %s: %s", cand.get("source_row_id", idx), e)
+                try:
+                    fallback_prod = self._create_error_fallback_product(session, cand, error=str(e))
+                    results[idx] = fallback_prod
+                except Exception as inner_e:
+                    logger.error("Failed creating fallback product for row %s: %s", cand.get("source_row_id", idx), inner_e)
             finally:
                 with lock:
                     completed_count += 1

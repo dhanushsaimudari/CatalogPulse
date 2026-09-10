@@ -1,5 +1,15 @@
 from typing import List, Dict, Tuple
 
+# ==============================================================================
+# STANDARDIZED DESCRIPTION CHANNEL CHARACTER LIMITS
+# Rationale:
+# - mobile_desc: 35 chars max (standard mobile handheld/warehouse scanner display)
+# - invoice_desc: 30 chars max (legacy ERP/EDI billing character boundary)
+# - short_desc: 50 chars max (POS terminal and condensed catalog index limit)
+# - long_desc: 800 chars max (technical catalog specification block)
+# - retail_desc: 150 chars max (retail packaging shelf-tag / item card boundary)
+# - marketing_description: 2000 chars max (e-commerce PDP hero narrative)
+# ==============================================================================
 CHAR_LIMITS = {
     "mobile_desc": 35,
     "invoice_desc": 30,

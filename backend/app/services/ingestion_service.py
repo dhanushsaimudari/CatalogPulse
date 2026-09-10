@@ -2,7 +2,7 @@ import pandas as pd
 import io
 import os
 import uuid
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from app.storage.ibm_object_storage import storage_adapter
 from app.core.exceptions import InvalidInputDataError
 from app.core.logging import logger
@@ -22,7 +22,7 @@ COLUMN_MAPS = {
 }
 
 class IngestionService:
-    def process_import(self, file_name: str, content_bytes: bytes) -> Tuple[str, int, List[Dict[str, Any]]]:
+    def process_import(self, file_name: str, content_bytes: bytes, session: Optional[Any] = None) -> Tuple[str, int, List[Dict[str, Any]]]:
         ext = os.path.splitext(file_name)[1].lower()
         if ext not in ALLOWED_EXTENSIONS:
             raise InvalidInputDataError(f"Unsupported file type '{ext}'. Please upload CSV, XLSX, PDF or image files.")
@@ -38,15 +38,22 @@ class IngestionService:
         scratch_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "scratch"))
         os.makedirs(scratch_dir, exist_ok=True)
         temp_path = os.path.join(scratch_dir, f"{import_id}_{safe_name}")
-        with open(temp_path, "wb") as f:
-            f.write(content_bytes)
 
-        storage_adapter.upload_file(temp_path, object_key)
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
+        if session and hasattr(session, "add_temporary_file"):
+            session.add_temporary_file(temp_path)
+
+        try:
+            with open(temp_path, "wb") as f:
+                f.write(content_bytes)
+            storage_adapter.upload_file(temp_path, object_key)
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception as e:
+                    logger.warning(f"Could not remove temp file {temp_path}: {e}")
+            if session and hasattr(session, "remove_temporary_file"):
+                session.remove_temporary_file(temp_path)
 
 
         # 2. Parse File Content
@@ -121,4 +128,37 @@ class IngestionService:
         logger.info(f"Ingestion complete for import '{import_id}': {len(candidates)} records created from {file_name}.")
         return import_id, len(candidates), candidates
 
+    def cleanup_test_artifacts(self, protect_benchmarks: bool = True) -> int:
+        """
+        Safely purges orphaned synthetic scale files and temporary test uploads,
+        strictly preserving the canonical benchmark files:
+          - import-2fe6606a_Unihack_ Sample Dataset - Input.csv
+          - import-1e365f74_sortolog_sanity_test.csv
+        """
+        inputs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "storage_data", "inputs"))
+        if not os.path.exists(inputs_dir):
+            return 0
+
+        protected = {
+            "import-2fe6606a_Unihack_ Sample Dataset - Input.csv",
+            "import-1e365f74_sortolog_sanity_test.csv"
+        }
+
+        removed_count = 0
+        for fname in os.listdir(inputs_dir):
+            if protect_benchmarks and fname in protected:
+                continue
+            # Remove repeated synthetic scale files or transient test feeds
+            if "Synthetic_Scale" in fname or fname.endswith(("_test_feed.csv", "_test_catalog.csv", "_dropped_catalog.csv", "_one-row.csv", "_manufacturer_spec.pdf", "_product_photo.png")):
+                fpath = os.path.join(inputs_dir, fname)
+                try:
+                    os.remove(fpath)
+                    removed_count += 1
+                except Exception as e:
+                    logger.warning(f"Could not remove test file {fpath}: {e}")
+
+        logger.info(f"Cleaned up {removed_count} temporary test artifacts from storage_data/inputs.")
+        return removed_count
+
 ingestion_service = IngestionService()
+

@@ -61,3 +61,35 @@ export async function autofixReviewItem(reviewId: string): Promise<ReviewItem | 
 
   return null;
 }
+
+export async function editReviewItem(reviewId: string, customValue: string): Promise<ReviewItem | null> {
+  try {
+    const sessionId = getActiveSessionId();
+    const url = `${API_BASE}/sessions/${sessionId}/reviews/${reviewId}/edit?custom_value=${encodeURIComponent(customValue)}`;
+    const res = await fetch(url, { method: 'POST' });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.error('[API Error] reviews edit API call failed:', e);
+  }
+
+  return null;
+}
+
+export async function bulkFixReviews(reviewIds?: string[], fixAll: boolean = false): Promise<any> {
+  try {
+    const sessionId = getActiveSessionId();
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/reviews/bulk-fix`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ review_ids: reviewIds, fix_all: fixAll })
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.error('[API Error] bulkFixReviews failed:', e);
+  }
+  return null;
+}

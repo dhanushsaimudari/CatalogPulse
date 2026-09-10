@@ -1,3 +1,4 @@
+import re
 from typing import Dict, Any, List, Optional, Tuple
 from app.core.config import settings
 from app.core.logging import logger
@@ -48,40 +49,199 @@ class AIProviderRouter:
 
     def _deterministic_classify(self, description: str) -> AIClassificationResult:
         desc_upper = description.upper()
-        if "DISHWASHER" in desc_upper:
+        if any(k in desc_upper for k in ["DISHWASHER", "REFRIGERATOR", "RANGE", "MICROWAVE", "OVEN", "FREEZER"]):
+            noun = "Built-In Dishwashers" if "DISHWASHER" in desc_upper else "Major Kitchen Appliances"
             return AIClassificationResult(
                 department="Appliances & Consumer Electronics",
                 class_name="Kitchen Appliances",
-                fine_class="Built-In Dishwashers",
-                classpath="Appliances & Consumer Electronics>Kitchen Appliances>Built-In Dishwashers",
-                confidence=0.95,
-                reason="Local deterministic structural keyword match ('DISHWASHER')"
+                fine_class=noun,
+                classpath=f"Appliances & Consumer Electronics>Kitchen Appliances>{noun}",
+                confidence=0.96,
+                reason="Deterministic industrial keyword match (Kitchen Appliances)"
             )
-        elif "DISC" in desc_upper or "CUT-OFF" in desc_upper:
+        elif any(k in desc_upper for k in ["CUT-OFF", "CUTOFF", "GRINDING WHEEL", "GRINDING DISC", "FLAP DISC", "ABRASIVE", "SANDING DISC", "SANDPAPER"]):
+            noun = "Metal Cut-Off Discs" if ("CUT-OFF" in desc_upper or "CUTOFF" in desc_upper) else "Abrasive Wheels & Discs"
             return AIClassificationResult(
                 department="Abrasives & Cutting Tools",
                 class_name="Abrasive Discs",
-                fine_class="Metal Cut-Off Discs",
-                classpath="Abrasives & Cutting Tools>Abrasive Discs>Metal Cut-Off Discs",
-                confidence=0.95,
-                reason="Local deterministic structural keyword match ('CUT-OFF DISC')"
+                fine_class=noun,
+                classpath=f"Abrasives & Cutting Tools>Abrasive Discs>{noun}",
+                confidence=0.96,
+                reason="Deterministic industrial keyword match (Abrasive Discs)"
             )
-        elif "CRIMPER" in desc_upper or "TOOL" in desc_upper:
+        elif any(k in desc_upper for k in ["LED", "BULB", "LAMP", "LIGHT BULB", "LUMINAIRE"]):
+            noun = "LED Replacement Lamps" if "LED" in desc_upper else "Lamps & Bulbs"
+            return AIClassificationResult(
+                department="Electrical & Lighting",
+                class_name="Lamps & Bulbs",
+                fine_class=noun,
+                classpath=f"Electrical & Lighting>Lamps & Bulbs>{noun}",
+                confidence=0.96,
+                reason="Deterministic industrial keyword match (Lighting)"
+            )
+        elif any(k in desc_upper for k in ["SWITCH", "RECEPTACLE", "DUPLEX", "WALL PLATE", "OUTLET", "WIRE", "CABLE"]):
+            return AIClassificationResult(
+                department="Electrical & Lighting",
+                class_name="Wiring Devices",
+                fine_class="Switches & Receptacles",
+                classpath="Electrical & Lighting>Wiring Devices>Switches & Receptacles",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (Wiring Devices)"
+            )
+        elif any(k in desc_upper for k in ["DECKING", "DECK BOARD", "COMPOSITE DECK", "FASCIA", "RAILING", "BALUSTER"]):
+            noun = "Composite Decking" if "COMPOSITE" in desc_upper or "DECK" in desc_upper else "Decking & Railing"
+            return AIClassificationResult(
+                department="Building Materials",
+                class_name="Decking & Railing",
+                fine_class=noun,
+                classpath=f"Building Materials>Decking & Railing>{noun}",
+                confidence=0.96,
+                reason="Deterministic industrial keyword match (Decking & Building Materials)"
+            )
+        elif any(k in desc_upper for k in ["BOLT", "CAP SCREW", "HEX SCREW", "MACHINE SCREW", "WOOD SCREW", "DRYWALL SCREW", "ANCHOR", "WASHER", "NUT"]):
+            noun = "Hex Head Bolts" if "HEX" in desc_upper or "BOLT" in desc_upper else "Standard Fasteners"
+            return AIClassificationResult(
+                department="Fasteners & Hardware",
+                class_name="Bolts & Screws",
+                fine_class=noun,
+                classpath=f"Fasteners & Hardware>Bolts & Screws>{noun}",
+                confidence=0.96,
+                reason="Deterministic industrial keyword match (Fasteners)"
+            )
+        elif any(k in desc_upper for k in ["VALVE", "VLV", "BALL VALVE", "BALL VLV", "CHECK VALVE", "GATE VALVE", "PIPE FITTING", "NIPPLE", "COUPLING", "CPLG", "ELBOW", "TEE"]):
+            noun = "Ball Valves" if ("BALL" in desc_upper or "VLV" in desc_upper) else "Plumbing Valves & Fittings"
+            return AIClassificationResult(
+                department="Plumbing & Pumps",
+                class_name="Valves & Fittings",
+                fine_class=noun,
+                classpath=f"Plumbing & Pumps>Valves & Fittings>{noun}",
+                confidence=0.96,
+                reason="Deterministic industrial keyword match (Plumbing)"
+            )
+        elif any(k in desc_upper for k in ["SNIP", "SNIPS", "CRIMPER", "PLIER", "PLIERS", "CUTTER", "SHEAR", "SHEARS", "WRENCH", "SCREWDRIVER", "HAMMER", "TOOL", "SLIM DRIVER", "DRIVER", "BIT", "PHILLIPS BIT"]):
+            if "BIT" in desc_upper:
+                noun = "Driver Bits & Accessories"
+                cls_name = "Power Tool Accessories"
+            elif "DRIVER" in desc_upper or "SCREWDRIVER" in desc_upper:
+                noun = "Screwdrivers & Nut Drivers"
+                cls_name = "Hand Tools"
+            else:
+                noun = "Crimpers & Cutters" if ("CRIMPER" in desc_upper or "CUTTER" in desc_upper) else "Hand Tools & Snips"
+                cls_name = "Hand Tools"
             return AIClassificationResult(
                 department="Hand & Power Tools",
-                class_name="Hand Tools",
-                fine_class="Crimpers & Cutters",
-                classpath="Hand & Power Tools>Hand Tools>Crimpers & Cutters",
+                class_name=cls_name,
+                fine_class=noun,
+                classpath=f"Hand & Power Tools>{cls_name}>{noun}",
                 confidence=0.95,
-                reason="Local deterministic structural keyword match ('CRIMPER')"
+                reason="Deterministic industrial keyword match (Tools)"
+            )
+        elif any(k in desc_upper for k in ["MOTION LT", "LIGHT", "FIXTURE", "FLOODLIGHT", "LUMINAIRE"]):
+            return AIClassificationResult(
+                department="Electrical & Lighting",
+                class_name="Lighting Fixtures",
+                fine_class="Commercial & Residential Fixtures",
+                classpath="Electrical & Lighting>Lighting Fixtures>Commercial & Residential Fixtures",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (Lighting Fixtures)"
+            )
+        elif any(k in desc_upper for k in ["FAN", "CEILING FAN", "EXHAUST FAN"]):
+            return AIClassificationResult(
+                department="Appliances & Ventilation",
+                class_name="Fans & Air Movement",
+                fine_class="Ceiling & Exhaust Fans",
+                classpath="Appliances & Ventilation>Fans & Air Movement>Ceiling & Exhaust Fans",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (Fans & Ventilation)"
+            )
+        elif any(k in desc_upper for k in ["HEATED JACKET", "HEATED HOODIE", "JACKET KIT", "HOODIE KIT", "HEATED VEST"]):
+            return AIClassificationResult(
+                department="Safety & Workwear",
+                class_name="Workwear & Outerwear",
+                fine_class="Heated Gear & Apparel",
+                classpath="Safety & Workwear>Workwear & Outerwear>Heated Gear & Apparel",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (Heated Apparel)"
+            )
+        elif any(k in desc_upper for k in ["PNEUMATIC", "TUBING", "HOSE", "CYLINDER", "ACTUATOR", "FRL", "AIR FITTING"]):
+            noun = "Pneumatic Tubing & Hoses" if ("TUBING" in desc_upper or "HOSE" in desc_upper) else "Pneumatic Cylinders & Actuators"
+            return AIClassificationResult(
+                department="Industrial & Fluid Power",
+                class_name="Pneumatics",
+                fine_class=noun,
+                classpath=f"Industrial & Fluid Power>Pneumatics>{noun}",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (Fluid Power / Pneumatics)"
+            )
+        elif any(k in desc_upper for k in ["BEARING", "BALL BEARING", "ROLLER BEARING", "PULLEY", "SPROCKET", "V-BELT", "ROLLER CHAIN"]):
+            noun = "Ball & Roller Bearings" if "BEARING" in desc_upper else "Power Transmission Components"
+            return AIClassificationResult(
+                department="Power Transmission",
+                class_name="Bearings & Drives",
+                fine_class=noun,
+                classpath=f"Power Transmission>Bearings & Drives>{noun}",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (Power Transmission)"
+            )
+        elif any(k in desc_upper for k in ["RESISTOR", "CAPACITOR", "TRANSFORMER", "RELAY", "CONTACTOR", "FUSE", "CIRCUIT BREAKER", "TERMINAL BLOCK"]):
+            noun = "Passive Components & Controls"
+            return AIClassificationResult(
+                department="Electrical & Electronics",
+                class_name="Industrial Controls",
+                fine_class=noun,
+                classpath=f"Electrical & Electronics>Industrial Controls>{noun}",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (Electronics & Control)"
+            )
+        elif any(k in desc_upper for k in ["GLOVE", "GLOVES", "RESPIRATOR", "MASK", "EARPLUG", "SAFETY GLASSES", "HARD HAT"]):
+            noun = "Hand Protection & PPE" if "GLOVE" in desc_upper else "Personal Protective Equipment"
+            return AIClassificationResult(
+                department="Safety & Facilities",
+                class_name="Personal Protective Equipment",
+                fine_class=noun,
+                classpath=f"Safety & Facilities>Personal Protective Equipment>{noun}",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (Safety & PPE)"
+            )
+        elif any(k in desc_upper for k in ["THERMOSTAT", "REFRIGERANT", "HEAT PUMP", "CONDENSER", "FURNACE", "AIR FILTER"]):
+            return AIClassificationResult(
+                department="HVAC & Refrigeration",
+                class_name="Climate Control",
+                fine_class="HVAC Equipment & Supplies",
+                classpath="HVAC & Refrigeration>Climate Control>HVAC Equipment & Supplies",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (HVAC)"
+            )
+        elif any(k in desc_upper for k in ["ADHESIVE", "SEALANT", "GREASE", "LUBRICANT", "SOLVENT", "EPOXY", "TAPE"]):
+            return AIClassificationResult(
+                department="Chemicals & Lubricants",
+                class_name="Adhesives & Sealants",
+                fine_class="Industrial Adhesives & Sealants",
+                classpath="Chemicals & Lubricants>Adhesives & Sealants>Industrial Adhesives & Sealants",
+                confidence=0.95,
+                reason="Deterministic industrial keyword match (Chemicals & Adhesives)"
             )
         else:
+            # Dynamic Open-World Noun Phrase Extraction:
+            # Extract meaningful industrial noun phrase from description instead of hardcoding UNKNOWN
+            words = [w for w in re.split(r'[^A-Za-z0-9]+', description) if len(w) > 2 and not w.isdigit()]
+            meaningful_words = [w for w in words if w.upper() not in ["THE", "AND", "FOR", "WITH", "SET", "KIT", "OEM", "NEW", "PCS", "PACK"]]
+            if meaningful_words:
+                inferred_noun = " ".join(meaningful_words[-2:]).title()
+                return AIClassificationResult(
+                    department="Industrial Supply",
+                    class_name="Specialty Products",
+                    fine_class=inferred_noun,
+                    classpath=f"Industrial Supply>Specialty Products>{inferred_noun}",
+                    confidence=0.75,
+                    reason=f"Open-world product noun inference from description ('{inferred_noun}')"
+                )
             return AIClassificationResult(
                 department="General Industrial",
-                class_name="Unclassified",
+                class_name="Hardware & Supplies",
                 fine_class="UNKNOWN",
-                classpath="General Industrial>Unclassified>UNKNOWN",
-                confidence=0.50,
+                classpath="General Industrial>Hardware & Supplies>UNKNOWN",
+                confidence=0.40,
                 reason="Local deterministic fallback (Uncertain category)"
             )
 

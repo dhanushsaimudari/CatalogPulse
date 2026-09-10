@@ -10,7 +10,7 @@ from app.ai.schemas import (
     AIDescriptionResult,
     ProviderHealth
 )
-from app.ai.response_parser import parse_json_response
+from app.ai.watsonx_parser import parse_watsonx_json, WatsonxParsingError
 from app.ai.prompts.classification import CLASSIFICATION_PROMPT_TEMPLATE
 from app.ai.prompts.extraction import EXTRACTION_PROMPT_TEMPLATE
 from app.ai.prompts.description import DESCRIPTION_PROMPT_TEMPLATE
@@ -52,9 +52,10 @@ class WatsonxProvider(AbstractAIProvider):
                 message=f"IBM watsonx.ai operational (model={self.model_id})"
             )
         else:
+            status_code = "QUOTA_EXHAUSTED" if "429" in self.circuit_reason or "rate limit" in self.circuit_reason.lower() else "UNAVAILABLE"
             return ProviderHealth(
                 provider_name=self.provider_name,
-                status="UNAVAILABLE",
+                status=status_code,
                 circuit_open=True,
                 message=self.circuit_reason or "watsonx.ai circuit is open."
             )
@@ -71,10 +72,20 @@ class WatsonxProvider(AbstractAIProvider):
             "apikey": self.api_key
         }
         
-        resp = requests.post(iam_url, headers=headers, data=data, timeout=10)
-        if resp.status_code != 200:
+        try:
+            resp = requests.post(iam_url, headers=headers, data=data, timeout=10)
+        except Exception as e:
+            self.circuit_open = True
+            self.circuit_reason = f"IBM IAM connection failure: {e}"
+            raise RuntimeError(self.circuit_reason)
+
+        if resp.status_code in [401, 403, 404]:
             self.circuit_open = True
             self.circuit_reason = f"IBM IAM Auth failure ({resp.status_code}): {resp.text}"
+            raise RuntimeError(self.circuit_reason)
+        elif resp.status_code != 200:
+            self.circuit_open = True
+            self.circuit_reason = f"IBM IAM Auth error ({resp.status_code}): {resp.text}"
             raise RuntimeError(self.circuit_reason)
             
         token_data = resp.json()
@@ -109,22 +120,35 @@ class WatsonxProvider(AbstractAIProvider):
                 }
 
                 resp = requests.post(endpoint, headers=headers, json=payload, timeout=20)
+
+                # 401, 403, 404: Fail Fast
+                if resp.status_code in [401, 403, 404]:
+                    self.circuit_open = True
+                    self.circuit_reason = f"watsonx API fatal status {resp.status_code}: {resp.text}"
+                    raise RuntimeError(self.circuit_reason)
+
+                # 429: Bounded retry then trip circuit breaker
                 if resp.status_code == 429:
                     err_text = resp.text
                     if attempt < max_retries:
-                        time.sleep(0.6 * (attempt + 1))
+                        time.sleep(0.8 * (attempt + 1))
                         continue
                     else:
                         self.circuit_open = True
                         self.circuit_reason = f"watsonx API circuit open after rate limit retries (429): {err_text}"
-                        raise RuntimeError(f"watsonx generation failed (429): {err_text}")
+                        raise RuntimeError(self.circuit_reason)
+
+                # 5xx: Bounded exponential backoff
+                if resp.status_code >= 500:
+                    err_text = resp.text
+                    if attempt < max_retries:
+                        time.sleep(1.0 * (2 ** attempt))
+                        continue
+                    else:
+                        raise RuntimeError(f"watsonx server error ({resp.status_code}): {err_text}")
 
                 if resp.status_code != 200:
-                    err_text = resp.text
-                    if resp.status_code in [401, 403]:
-                        self.circuit_open = True
-                        self.circuit_reason = f"watsonx API circuit open on status {resp.status_code}: {err_text}"
-                    raise RuntimeError(f"watsonx generation failed ({resp.status_code}): {err_text}")
+                    raise RuntimeError(f"watsonx unexpected status ({resp.status_code}): {resp.text}")
 
                 result_json = resp.json()
                 results = result_json.get("results", [])
@@ -133,11 +157,17 @@ class WatsonxProvider(AbstractAIProvider):
                 return ""
             except Exception as e:
                 last_error = e
+                err_str = str(e)
+                if any(k in err_str for k in ["401", "403", "404"]):
+                    self.circuit_open = True
+                    self.circuit_reason = f"Circuit open due to auth/endpoint error: {e}"
+                    raise e
+
                 if attempt >= max_retries:
                     logger.warning(f"WatsonxProvider execution error: {e}")
-                    if any(k in str(e) for k in ["429", "401", "403", "ConnectionError", "getaddrinfo"]):
+                    if any(k in err_str for k in ["429", "ConnectionError", "getaddrinfo"]):
                         self.circuit_open = True
-                        self.circuit_reason = f"Circuit open due to error: {e}"
+                        self.circuit_reason = f"Circuit open due to network/rate error: {e}"
                     raise e
                 time.sleep(0.5)
         raise last_error
@@ -149,13 +179,27 @@ class WatsonxProvider(AbstractAIProvider):
             mpn=mpn, description=description, manufacturer=manufacturer, brand=brand
         )
         raw_text = self._generate(prompt)
-        parsed = parse_json_response(raw_text)
+        try:
+            parsed = parse_watsonx_json(raw_text)
+            if not isinstance(parsed, dict):
+                parsed = {}
+        except WatsonxParsingError as e:
+            logger.warning(f"watsonx classification parse failed: {e}. Falling back safely.")
+            return AIClassificationResult(
+                department="General Industrial",
+                class_name="Unclassified",
+                fine_class="UNKNOWN",
+                classpath="General Industrial>Unclassified>UNKNOWN",
+                confidence=0.50,
+                reason="watsonx output non-JSON (safe review fallback)"
+            )
+
         return AIClassificationResult(
             department=parsed.get("department", "General Industrial"),
             class_name=parsed.get("class_name", "Unclassified"),
             fine_class=parsed.get("fine_class", "UNKNOWN"),
             classpath=parsed.get("classpath", "General Industrial>Unclassified>UNKNOWN"),
-            confidence=parsed.get("confidence", 0.50),
+            confidence=float(parsed.get("confidence", 0.85)),
             reason=parsed.get("reason", "watsonx.ai taxonomy classification")
         )
 
@@ -166,7 +210,12 @@ class WatsonxProvider(AbstractAIProvider):
             mpn=mpn, description=description, classpath=classpath, lov_context=lov_context
         )
         raw_text = self._generate(prompt)
-        parsed = parse_json_response(raw_text)
+        try:
+            parsed = parse_watsonx_json(raw_text)
+        except WatsonxParsingError as e:
+            logger.warning(f"watsonx attribute parse failed: {e}")
+            return []
+
         results = []
         if isinstance(parsed, list):
             for seq, item in enumerate(parsed, 1):
@@ -190,7 +239,14 @@ class WatsonxProvider(AbstractAIProvider):
             mpn=mpn, manufacturer=manufacturer, brand=brand, noun=noun, attributes=attributes
         )
         raw_text = self._generate(prompt)
-        parsed = parse_json_response(raw_text)
+        try:
+            parsed = parse_watsonx_json(raw_text)
+            if not isinstance(parsed, dict):
+                parsed = {}
+        except WatsonxParsingError as e:
+            logger.warning(f"watsonx description parse failed: {e}")
+            parsed = {}
+
         return AIDescriptionResult(
             product_name=parsed.get("product_name", f"{brand} {noun} {mpn}"),
             mobile_desc=parsed.get("mobile_desc", f"{brand} {noun} {mpn}"[:35]),

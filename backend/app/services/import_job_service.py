@@ -40,7 +40,7 @@ class ImportJobService:
     def run_job(self, job_id: str, session: ProcessingSession, file_name: str, content_bytes: bytes) -> None:
         self._update(job_id, status="PROCESSING", stage="PARSING", progress=5)
         try:
-            import_id, total_rows, candidates = ingestion_service.process_import(file_name, content_bytes)
+            import_id, total_rows, candidates = ingestion_service.process_import(file_name, content_bytes, session=session)
             self._update(job_id, stage="ENRICHING", total_rows=total_rows, progress=10, import_id=import_id)
 
             processed_list = processing_service.process_candidates_batch(

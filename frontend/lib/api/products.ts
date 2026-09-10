@@ -59,3 +59,16 @@ export async function reprocessProduct(id: string): Promise<Product | null> {
 
   return null;
 }
+
+export async function fetchProductAudit(id: string): Promise<any[]> {
+  try {
+    const sessionId = getActiveSessionId();
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/products/${id}/audit`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.error('[API Error] fetchProductAudit failed:', e);
+  }
+  return [];
+}

@@ -3,12 +3,19 @@ from app.validation.uom_validator import uom_validator
 from app.validation.lov_validator import lov_validator
 from typing import Tuple
 
+from app.validation.content_validator import CHAR_LIMITS
+
 class AutoFixService:
     def apply_auto_fixes(self, product: ProductSchema) -> Tuple[ProductSchema, int]:
         fixes_applied = 0
 
+        UNBRANDED_SET = {"-- Unbranded --", "-- No Unilog Brand --", "-- No DIB Brand --"}
         # 1. Fix Brand Registered Trademark symbol
-        if product.identity.brand.canonical_value and not product.identity.brand.canonical_value.endswith("®"):
+        if (
+            product.identity.brand.canonical_value
+            and product.identity.brand.canonical_value not in UNBRANDED_SET
+            and not product.identity.brand.canonical_value.endswith("®")
+        ):
             product.identity.brand.canonical_value += "®"
             fixes_applied += 1
 
@@ -17,15 +24,12 @@ class AutoFixService:
             product.content.invoice_desc = product.content.invoice_desc.upper()
             fixes_applied += 1
 
-        # 3. Fix Invoice Description Length Limit (30 chars max)
-        if len(product.content.invoice_desc) > 30:
-            product.content.invoice_desc = product.content.invoice_desc[:30]
-            fixes_applied += 1
-
-        # 4. Fix Mobile Description Length Limit (35 chars max)
-        if len(product.content.mobile_desc) > 35:
-            product.content.mobile_desc = product.content.mobile_desc[:35]
-            fixes_applied += 1
+        # 3. Fix Standardized Description Channel Limits (CHAR_LIMITS)
+        for field, max_len in CHAR_LIMITS.items():
+            val = getattr(product.content, field, None)
+            if val and len(val) > max_len:
+                setattr(product.content, field, val[:max_len])
+                fixes_applied += 1
 
         # 5. Fix Attribute UOM Spacing & Values
         for attr in product.attributes:

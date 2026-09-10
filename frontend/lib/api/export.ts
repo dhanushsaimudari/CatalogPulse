@@ -34,3 +34,36 @@ export async function exportSessionCsv(): Promise<{ success: boolean; message?: 
     return { success: false, message: err?.message || "Network error during CSV export." };
   }
 }
+
+export async function exportCleanIntelligenceCsv(): Promise<{ success: boolean; message?: string }> {
+  try {
+    const sessionId = getActiveSessionId();
+    const res = await fetch(`${API_BASE}/sessions/${sessionId}/export-clean`, {
+      method: 'POST',
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => null);
+      const msg = errData?.detail || `Clean export failed with status ${res.status}`;
+      return { success: false, message: msg };
+    }
+
+    const blob = await res.blob();
+    if (blob.size === 0) {
+      return { success: false, message: "Exported Clean CSV is empty." };
+    }
+
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Sortolog_Session_${sessionId}_Clean_Intelligence.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    return { success: true };
+  } catch (err: any) {
+    console.error("Clean export error:", err);
+    return { success: false, message: err?.message || "Network error during Clean CSV export." };
+  }
+}
