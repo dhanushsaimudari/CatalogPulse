@@ -1,9 +1,7 @@
 # Environment & Secret Files
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 *.pem
 *.key
 credentials.json
@@ -26,12 +24,18 @@ venv/
 env/
 ENV/
 
-# Node.js & Next.js Build Artifacts
+# Node.js, Next.js & Vercel Artifacts
+node_modules/
 frontend/node_modules/
+.next/
 frontend/.next/
+out/
 frontend/out/
+build/
 frontend/build/
-.npm
+.vercel/
+frontend/.vercel/
+.npm/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -46,6 +50,11 @@ backend/storage_data/products/*
 backend/storage_data/evaluation/*
 backend/storage_data/reports/*
 !backend/storage_data/**/.gitkeep
+scratch/*.csv
+scratch/*.xlsx
+scratch/*.json
+scratch/*.tmp
+scratch/__pycache__/
 
 # IDEs & System Files
 .vscode/
@@ -54,3 +63,4 @@ backend/storage_data/reports/*
 *.swo
 .DS_Store
 Thumbs.db
+desktop.ini
