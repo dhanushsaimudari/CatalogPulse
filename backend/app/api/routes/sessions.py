@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Query, HTTPException, status, Response, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Query, HTTPException, status, Response, BackgroundTasks, Body
 from typing import Optional
 from app.session.session_manager import session_manager
 from app.services.ingestion_service import ingestion_service
@@ -263,8 +263,9 @@ def get_session_product_audit(session_id: str, product_id: str):
     return events
 
 @router.post("/sessions/{session_id}/reviews/bulk-fix")
-def bulk_fix_session_reviews(session_id: str, payload: dict = {}):
+def bulk_fix_session_reviews(session_id: str, payload: Optional[dict] = Body(default={})):
     session = session_manager.get_or_create_session(session_id)
+    payload = payload or {}
     review_ids = payload.get("review_ids")
     fix_all = payload.get("fix_all", False)
     return review_service.bulk_fix_reviews(session, review_ids=review_ids, fix_all=fix_all)

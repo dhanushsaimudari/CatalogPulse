@@ -19,8 +19,8 @@ class WatsonxProvider(AbstractAIProvider):
     def __init__(self):
         self.api_key = (settings.WATSONX_API_KEY or "").strip()
         self.project_id = (settings.WATSONX_PROJECT_ID or "").strip()
-        self.url = settings.WATSONX_URL.rstrip("/")
-        self.model_id = settings.WATSONX_MODEL_ID
+        self.url = (settings.WATSONX_URL or "").strip().rstrip("/")
+        self.model_id = (settings.WATSONX_MODEL_ID or "").strip()
         
         self.iam_token: Optional[str] = None
         self.token_expiry: float = 0.0

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, HTTPException, status
+from fastapi import APIRouter, Query, HTTPException, status, Body
 from typing import Optional
 from app.session.session_manager import session_manager
 from app.services.review_service import review_service
@@ -60,10 +60,11 @@ def edit_review(
 
 @router.post("/reviews/bulk-fix")
 def bulk_fix_reviews(
-    payload: dict = {},
+    payload: Optional[dict] = Body(default={}),
     session_id: Optional[str] = Query(None)
 ):
     session = session_manager.get_or_create_session(session_id)
+    payload = payload or {}
     review_ids = payload.get("review_ids")
     fix_all = payload.get("fix_all", False)
     return review_service.bulk_fix_reviews(session, review_ids=review_ids, fix_all=fix_all)

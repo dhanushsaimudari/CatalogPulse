@@ -1,4 +1,4 @@
-import { ReviewItem } from '../../types/review';
+import { ReviewItem, BulkFixResponse } from '../../types/review';
 import { getActiveSessionId } from '../session';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '/api/v1';
@@ -77,7 +77,7 @@ export async function editReviewItem(reviewId: string, customValue: string): Pro
   return null;
 }
 
-export async function bulkFixReviews(reviewIds?: string[], fixAll: boolean = false): Promise<any> {
+export async function bulkFixReviews(reviewIds?: string[], fixAll: boolean = false): Promise<BulkFixResponse | null> {
   try {
     const sessionId = getActiveSessionId();
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/reviews/bulk-fix`, {

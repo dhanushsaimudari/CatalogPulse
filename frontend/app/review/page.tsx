@@ -8,7 +8,7 @@ import { ReviewDetailPanel } from '../../components/review/ReviewDetailPanel';
 import { KeyboardShortcutsHelp } from '../../components/review/KeyboardShortcutsHelp';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { CheckCircle2, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, ShieldAlert, AlertCircle } from 'lucide-react';
 
 export default function ReviewPage() {
   const [items, setItems] = useState<ReviewItem[]>([]);
@@ -17,6 +17,10 @@ export default function ReviewPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [notification, setNotification] = useState<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     loadItems();
@@ -35,6 +39,7 @@ export default function ReviewPage() {
     setLoading(true);
     const data = await fetchReviewItems();
     setItems(data);
+    setSelectedIndex((prev) => Math.min(Math.max(0, data.length - 1), prev));
     setLoading(false);
   };
 
@@ -71,20 +76,92 @@ export default function ReviewPage() {
   const handleFixSelected = async () => {
     if (selectedReviewIds.size === 0) return;
     setBulkProcessing(true);
-    await bulkFixReviews(Array.from(selectedReviewIds), false);
-    setSelectedReviewIds(new Set());
-    await loadItems();
-    setBulkProcessing(false);
-    window.dispatchEvent(new CustomEvent('catalog-updated'));
+    setNotification(null);
+    try {
+      const ids = Array.from(selectedReviewIds);
+      const res = await bulkFixReviews(ids, false);
+      setSelectedReviewIds(new Set());
+      await loadItems();
+      window.dispatchEvent(new CustomEvent('catalog-updated'));
+
+      if (res) {
+        if (res.applied_count > 0 && res.failed_count === 0) {
+          setNotification({
+            type: 'success',
+            message: `Successfully fixed ${res.applied_count} selected exception${res.applied_count > 1 ? 's' : ''} across ${res.affected_products_count} product${res.affected_products_count > 1 ? 's' : ''}.`
+          });
+        } else if (res.applied_count > 0 && res.failed_count > 0) {
+          setNotification({
+            type: 'info',
+            message: `Fixed ${res.applied_count} item${res.applied_count > 1 ? 's' : ''}, but ${res.failed_count} item${res.failed_count > 1 ? 's' : ''} could not be auto-fixed.`
+          });
+        } else {
+          setNotification({
+            type: 'error',
+            message: `Could not auto-fix selected items (${res.failed_count} failed). Please review suggestions or edit manually.`
+          });
+        }
+      } else {
+        setNotification({
+          type: 'error',
+          message: 'Bulk fix failed. Unable to communicate with session service.'
+        });
+      }
+    } catch (err: any) {
+      setNotification({
+        type: 'error',
+        message: `Bulk fix error: ${err.message || 'Unknown error occurred.'}`
+      });
+    } finally {
+      setBulkProcessing(false);
+    }
   };
 
   const handleFixAll = async () => {
     setBulkProcessing(true);
-    await bulkFixReviews(undefined, true);
-    setSelectedReviewIds(new Set());
-    await loadItems();
-    setBulkProcessing(false);
-    window.dispatchEvent(new CustomEvent('catalog-updated'));
+    setNotification(null);
+    try {
+      const res = await bulkFixReviews(undefined, true);
+      setSelectedReviewIds(new Set());
+      await loadItems();
+      window.dispatchEvent(new CustomEvent('catalog-updated'));
+
+      if (res) {
+        if (res.applied_count > 0 && res.failed_count === 0) {
+          setNotification({
+            type: 'success',
+            message: `Successfully auto-fixed all ${res.applied_count} eligible review exception${res.applied_count > 1 ? 's' : ''} across ${res.affected_products_count} product${res.affected_products_count > 1 ? 's' : ''}.`
+          });
+        } else if (res.applied_count > 0 && res.failed_count > 0) {
+          setNotification({
+            type: 'info',
+            message: `Auto-fixed ${res.applied_count} eligible item${res.applied_count > 1 ? 's' : ''}. ${res.failed_count} item${res.failed_count > 1 ? 's' : ''} remain unfixable or require manual review.`
+          });
+        } else if (res.eligible_count === 0) {
+          setNotification({
+            type: 'info',
+            message: 'No eligible auto-fixable items found in pending queue.'
+          });
+        } else {
+          setNotification({
+            type: 'error',
+            message: `Auto-fix completed with 0 applied fixes (${res.failed_count} failed).`
+          });
+        }
+      } else {
+        setNotification({
+          type: 'error',
+          message: 'Bulk fix all failed. Unable to communicate with session service.'
+        });
+      }
+    } catch (err: any) {
+      setNotification({
+        type: 'error',
+        message: `Bulk fix error: ${err.message || 'Unknown error occurred.'}`
+      });
+    } finally {
+      setBulkProcessing(false);
+    }
   };
 
   const handleApprove = async (item: ReviewItem) => {
@@ -204,7 +281,7 @@ export default function ReviewPage() {
               disabled={bulkProcessing || selectedReviewIds.size === 0}
               className="bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-800"
             >
-              Fix Selected ({selectedReviewIds.size})
+              {bulkProcessing ? 'Processing...' : `Fix Selected (${selectedReviewIds.size})`}
             </Button>
             <Button
               size="sm"
@@ -213,9 +290,38 @@ export default function ReviewPage() {
               disabled={bulkProcessing}
               className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
             >
-              Fix All Eligible
+              {bulkProcessing ? 'Processing...' : 'Fix All Eligible'}
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* Bulk Action Result Notification */}
+      {notification && (
+        <div
+          className={`p-3 rounded-lg text-xs font-mono flex items-center justify-between gap-2 border ${
+            notification.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+              : notification.type === 'info'
+              ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-800 dark:text-blue-300'
+              : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {notification.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            ) : (
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+            )}
+            <span>{notification.message}</span>
+          </div>
+          <button
+            onClick={() => setNotification(null)}
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold px-1"
+            title="Dismiss notification"
+          >
+            ×
+          </button>
         </div>
       )}
 

@@ -33,7 +33,8 @@ app = FastAPI(
 )
 
 # CORS Middleware Setup
-cors_origins = list(dict.fromkeys(settings.CORS_ORIGINS + ([settings.FRONTEND_URL] if settings.FRONTEND_URL else [])))
+frontend_clean = settings.FRONTEND_URL.rstrip("/").strip() if settings.FRONTEND_URL else ""
+cors_origins = list(dict.fromkeys(settings.CORS_ORIGINS + ([frontend_clean] if frontend_clean else [])))
 cors_origins = [o for o in cors_origins if o != "*"]
 
 app.add_middleware(

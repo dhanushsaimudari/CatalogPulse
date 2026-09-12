@@ -151,9 +151,13 @@ python run_backend.py
 * Health Endpoint: `http://localhost:8000/health`
 
 ### 2. Frontend Setup
-In a new terminal:
+In a new terminal, you can start the frontend either from the root or inside `frontend/`:
 
 ```bash
+# Option A: Directly from repository root
+npm run dev
+
+# Option B: From frontend directory
 cd frontend
 npm install
 npm run dev
@@ -166,6 +170,7 @@ npm run dev
 
 ```text
 Sortlog-IQ/
+├── package.json                  # Root monorepo script runner
 ├── .env.example                  # Environment configuration template
 ├── .gitignore                    # Git tracking rules (protects .env, node_modules, build cache)
 ├── .python-version               # Pinned Python version (3.11.9) for Render
@@ -191,7 +196,7 @@ Sortlog-IQ/
 │   │   ├── session/              # Thread-safe in-memory session manager & models
 │   │   ├── storage/              # Object storage & local disk adapters
 │   │   └── validation/           # Validation engine, rules, UOM/LOV checkers, auto-fix
-│   └── tests/                    # 67 Unit, Regression & Scalability tests
+│   └── tests/                    # 86 Unit, Regression & Scalability tests
 └── frontend/
     ├── app/                      # Next.js App Router pages (Dashboard, Upload, Products, Review, Evaluation)
     ├── components/               # React UI, Enrichment, Review, and Evaluation components
@@ -211,7 +216,7 @@ The codebase includes an extensive automated test suite covering open-world reso
 ```bash
 python -m pytest backend/tests -v
 ```
-*(67 / 67 tests passing)*
+*(86 / 86 tests passing)*
 
 ### Key Regression Tests:
 * `test_duplicate_mpn_concurrency.py` — Verifies thread-safe collision-free ID allocation for duplicate MPNs across 10 worker threads, ensuring 1,000 input rows yield exactly 1,000 processed products.

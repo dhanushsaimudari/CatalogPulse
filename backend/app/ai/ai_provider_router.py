@@ -248,21 +248,50 @@ class AIProviderRouter:
     def _deterministic_generate_descriptions(
         self, mpn: str, manufacturer: str, brand: str, noun: str
     ) -> AIDescriptionResult:
-        clean_brand = brand.replace("®", "").strip().upper()
+        clean_brand = brand.replace("®", "").strip()
+        is_unbranded = not clean_brand or clean_brand.upper() in [
+            "-- UNBRANDED --", "-- NO UNILOG BRAND --", "-- NO DIB BRAND --",
+            "COMMODITY - UNBRANDED", "UNKNOWN", "N/A", "NONE"
+        ]
+        disp_brand = "" if is_unbranded else brand.strip()
+        disp_noun = noun.strip() if noun and noun.upper() not in ["UNKNOWN", "NONE", "UNCLASSIFIED"] else "Product"
+        
+        name_parts = [p for p in [disp_brand, disp_noun, mpn] if p]
+        prod_name = " ".join(name_parts)
+        
+        clean_mfr = manufacturer.strip() if manufacturer and manufacturer.upper() not in ["UNKNOWN", "UNVERIFIED", "-- UNBRANDED --", "N/A", "NONE", ""] else ""
+        
+        long_desc_parts = [f"{disp_brand} {disp_noun}".strip() if disp_brand else disp_noun]
+        if mpn:
+            long_desc_parts.append(f"(MPN: {mpn})")
+        if clean_mfr:
+            long_desc_parts.append(f"manufactured by {clean_mfr}.")
+        else:
+            long_desc_parts[-1] += "."
+        long_desc = " ".join(long_desc_parts)
+        
+        retail_desc = f"{disp_brand} {disp_noun} {mpn}".strip() if disp_brand else f"{disp_noun} {mpn}".strip()
+        marketing_desc = long_desc
+        
+        item_features = []
+        if disp_noun and disp_noun != "Product":
+            item_features.append(f"Product Type: {disp_noun}")
+        if clean_mfr:
+            item_features.append(f"Manufacturer: {clean_mfr}")
+        if disp_brand:
+            item_features.append(f"Brand: {disp_brand}")
+        if mpn:
+            item_features.append(f"Part Number: {mpn}")
+
         return AIDescriptionResult(
-            product_name=f"{brand} {noun} {mpn}".strip(),
-            mobile_desc=f"{clean_brand} {noun} {mpn}"[:35],
-            invoice_desc=f"{clean_brand} {noun} {mpn}".upper()[:30],
-            short_desc=f"{brand} {noun} {mpn} Industrial Spec",
-            long_desc=f"{brand} {noun} (MPN: {mpn}) manufactured by {manufacturer}. Engineered for high-performance industrial reliability.",
-            retail_desc=f"Upgrade your operations with the {brand} {noun} ({mpn}).",
-            marketing_description=f"The {brand} {noun} model {mpn} offers superior efficiency, heavy-duty construction, and trusted performance.",
-            item_features=[
-                f"Heavy-duty industrial grade {noun}",
-                f"Manufactured by {manufacturer}",
-                f"Standard commercial voltage & footprint",
-                f"Original MPN: {mpn}"
-            ]
+            product_name=prod_name,
+            mobile_desc=prod_name[:35],
+            invoice_desc=prod_name.upper()[:30],
+            short_desc=prod_name[:50],
+            long_desc=long_desc[:800],
+            retail_desc=retail_desc[:150],
+            marketing_description=marketing_desc[:2000],
+            item_features=item_features
         )
 
     def classify_product(
@@ -373,6 +402,43 @@ class AIProviderRouter:
             self._desc_cache[cache_key] = res_tuple
         return res_tuple
 
+    def _sanitize_grounded_description(self, desc: AIDescriptionResult) -> AIDescriptionResult:
+        unsupported_patterns = [
+            r'\b(?:engineered for high[- ]performance industrial reliability|engineered for reliability|engineered for high[- ]performance)\b',
+            r'\b(?:high[- ]performance|industrial[- ]grade|premium quality|professional[- ]grade|best[- ]in[- ]class)\b',
+            r'\b(?:superior performance|superior efficiency|heavy[- ]duty construction|trusted performance)\b',
+            r'\b(?:heavy[- ]duty industrial grade|heavy[- ]duty)\b',
+            r'\b(?:standard commercial voltage & footprint)\b',
+            r'\b(?:upgrade your operations with(?: the)?)\b',
+        ]
+        def clean_str(s: str) -> str:
+            if not s:
+                return ""
+            cleaned = s
+            for pat in unsupported_patterns:
+                cleaned = re.sub(pat, '', cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r'\s+', ' ', cleaned)
+            cleaned = re.sub(r'\s+([.,;:!?])', r'\1', cleaned)
+            cleaned = re.sub(r'([.,;:])\s*\1+', r'\1', cleaned)
+            return cleaned.strip()
+
+        clean_features = []
+        for feat in (desc.item_features or []):
+            cf = clean_str(feat)
+            if cf and len(cf) > 3 and not any(k in cf.lower() for k in ["heavy-duty", "high-performance", "commercial voltage"]):
+                clean_features.append(cf)
+
+        return AIDescriptionResult(
+            product_name=clean_str(desc.product_name),
+            mobile_desc=clean_str(desc.mobile_desc)[:35],
+            invoice_desc=clean_str(desc.invoice_desc).upper()[:30],
+            short_desc=clean_str(desc.short_desc)[:50],
+            long_desc=clean_str(desc.long_desc)[:800],
+            retail_desc=clean_str(desc.retail_desc)[:150],
+            marketing_description=clean_str(desc.marketing_description)[:2000],
+            item_features=clean_features
+        )
+
     def _do_generate_descriptions(
         self, mpn: str, manufacturer: str, brand: str, noun: str, attributes: str, session: Optional[Any] = None
     ) -> Tuple[AIDescriptionResult, str]:
@@ -384,7 +450,7 @@ class AIProviderRouter:
                 res = self.primary_provider.generate_descriptions(mpn, manufacturer, brand, noun, attributes)
                 if session:
                     session.record_ai_call("IBM watsonx.ai")
-                return res, "IBM watsonx.ai"
+                return self._sanitize_grounded_description(res), "IBM watsonx.ai"
             except Exception as e:
                 logger.warning(f"Primary AI Provider (IBM watsonx.ai) description generation failed: {e}")
                 if session:
@@ -395,7 +461,7 @@ class AIProviderRouter:
                 res = self.secondary_provider.generate_descriptions(mpn, manufacturer, brand, noun, attributes)
                 if session:
                     session.record_ai_call("Gemini")
-                return res, "Gemini (Secondary Fallback)"
+                return self._sanitize_grounded_description(res), "Gemini (Secondary Fallback)"
             except Exception as e:
                 logger.warning(f"Secondary AI Provider (Gemini) description generation failed: {e}")
                 if session:

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Badge } from '../ui/Badge';
 import { Cpu, Trash2, PlusCircle, Sun, Moon, Download } from 'lucide-react';
 import { getActiveSessionId, createNewSession, clearCurrentSession, initSession } from '../../lib/session';
-import { exportSessionCsv, exportCleanIntelligenceCsv } from '../../lib/api/export';
+import { exportCleanIntelligenceCsv } from '../../lib/api/export';
 import { useTheme } from '../../lib/theme-context';
 import { ConnectivityIndicator } from './ConnectivityIndicator';
 
@@ -93,21 +93,6 @@ export const Header: React.FC = () => {
     } catch (e) { }
   };
 
-  const handleExportCsv = async () => {
-    setExporting(true);
-    try {
-      const res = await exportSessionCsv();
-      if (!res.success) {
-        alert(res.message || 'Export failed. Please ensure catalog products exist in active session.');
-      }
-    } catch (err: any) {
-      console.error('Export CSV error:', err);
-      alert(`Export CSV Error: ${err.message || 'Failed to download export file'}`);
-    } finally {
-      setExporting(false);
-      checkSessionStatus();
-    }
-  };
 
   const handleExportCleanCsv = async () => {
     setExporting(true);
@@ -195,23 +180,13 @@ export const Header: React.FC = () => {
         <div className="h-4 w-px bg-slate-300 dark:bg-slate-800 my-auto mx-1" />
 
         <button
-          onClick={handleExportCsv}
-          disabled={exporting}
-          className="px-2.5 py-1.5 rounded text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5 transition-colors disabled:opacity-50"
-          title="Export 252-Column Unilog Delivery CSV"
-        >
-          <Download className="w-3.5 h-3.5" />
-          {exporting ? 'Exporting...' : '252-Col Delivery'}
-        </button>
-
-        <button
           onClick={handleExportCleanCsv}
           disabled={exporting}
           className="px-2.5 py-1.5 rounded text-[11px] font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900 border border-blue-200 dark:border-blue-800 flex items-center gap-1.5 transition-colors disabled:opacity-50"
-          title="Export Clean Intelligence CSV (Human-readable, only populated semantic attributes)"
+          title="Download Clean CSV"
         >
           <Download className="w-3.5 h-3.5" />
-          {exporting ? 'Exporting...' : 'Clean CSV'}
+          {exporting ? 'Exporting...' : 'Download Clean CSV'}
         </button>
 
         <button

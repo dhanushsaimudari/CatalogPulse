@@ -1,0 +1,14 @@
+{
+  "name": "sortlog-iq",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SORTOLOG IQ — Open-World Industrial Product Intelligence & Enrichment Engine",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix frontend run start",
+    "lint": "npm --prefix frontend run lint",
+    "test": "npm --prefix frontend run test",
+    "test:backend": "pytest backend/tests -v"
+  }
+}

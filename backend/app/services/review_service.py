@@ -221,30 +221,51 @@ class ReviewService:
         Updates product fields, audit trails, recalculates product quality, and preserves unresolved items.
         """
         all_pending = session.list_reviews(status="PENDING")
-        if fix_all:
-            eligible_reviews = [r for r in all_pending if r.suggested_value and str(r.suggested_value).strip() not in ["", "REQUIRED"]]
-        elif review_ids:
-            target_set = set(review_ids)
-            eligible_reviews = [r for r in all_pending if r.id in target_set and r.suggested_value and str(r.suggested_value).strip() not in ["", "REQUIRED"]]
-        else:
-            eligible_reviews = []
-
         applied_count = 0
         failed_count = 0
         applied_results = []
         affected_product_ids = set()
 
-        for rev in eligible_reviews:
-            try:
-                res = self.autofix_review(session, rev.id)
-                if res:
-                    applied_count += 1
-                    applied_results.append(res.model_dump())
-                    affected_product_ids.add(rev.product_id)
-                else:
+        if fix_all:
+            eligible_reviews = [
+                r for r in all_pending
+                if r.suggested_value and str(r.suggested_value).strip() not in ["", "REQUIRED"]
+            ]
+            selected_count = len(eligible_reviews)
+            for rev in eligible_reviews:
+                try:
+                    res = self.autofix_review(session, rev.review_id)
+                    if res:
+                        applied_count += 1
+                        applied_results.append(res.model_dump())
+                        affected_product_ids.add(rev.product_id)
+                    else:
+                        failed_count += 1
+                except Exception:
                     failed_count += 1
-            except Exception:
-                failed_count += 1
+
+        elif review_ids:
+            target_set = set(review_ids)
+            selected_count = len(review_ids)
+            pending_by_id = {r.review_id: r for r in all_pending if r.review_id in target_set}
+            missing_ids_count = len(target_set - set(pending_by_id.keys()))
+            failed_count += missing_ids_count
+
+            eligible_reviews = list(pending_by_id.values())
+            for rev in eligible_reviews:
+                try:
+                    res = self.autofix_review(session, rev.review_id)
+                    if res:
+                        applied_count += 1
+                        applied_results.append(res.model_dump())
+                        affected_product_ids.add(rev.product_id)
+                    else:
+                        failed_count += 1
+                except Exception:
+                    failed_count += 1
+        else:
+            eligible_reviews = []
+            selected_count = 0
 
         if applied_count > 0:
             from app.evaluation.evaluator import evaluator_engine
@@ -255,7 +276,7 @@ class ReviewService:
 
         return {
             "status": "COMPLETED",
-            "selected_count": len(review_ids) if review_ids else len(eligible_reviews),
+            "selected_count": selected_count,
             "eligible_count": len(eligible_reviews),
             "applied_count": applied_count,
             "failed_count": failed_count,

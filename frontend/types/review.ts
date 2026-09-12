@@ -16,3 +16,13 @@ export interface ReviewItem {
   reviewed_at?: string;
   is_demo_data?: boolean;
 }
+
+export interface BulkFixResponse {
+  status: string;
+  selected_count: number;
+  eligible_count: number;
+  applied_count: number;
+  failed_count: number;
+  remaining_pending: number;
+  affected_products_count: number;
+}

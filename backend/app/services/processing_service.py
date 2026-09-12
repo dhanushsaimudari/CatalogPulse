@@ -123,7 +123,12 @@ class ProcessingService:
             for item in extracted_raw:
                 lbl_upper = item.label.strip().upper()
                 # Exclude identity fields that must never be in attributes[]
-                if lbl_upper in ["MANUFACTURER PART NUMBER", "PRIMARY BRAND", "MANUFACTURER", "BRAND"]:
+                if lbl_upper in ["MANUFACTURER PART NUMBER", "PRIMARY BRAND", "MANUFACTURER", "BRAND", "MPN", "SKU"]:
+                    continue
+                # Precision Gate: Contextual evidence & product category relevance
+                if not self.is_attribute_valid_and_grounded(
+                    item.label, item.raw_value, item.normalized_value, raw_desc, mpn, classification
+                ):
                     continue
                 sample_attributes.append(
                     ProductAttributeSchema(
@@ -152,9 +157,12 @@ class ProcessingService:
         existing_labels = {a.label.strip().upper() for a in sample_attributes}
         for da in discovered_attrs:
             if da.label.strip().upper() not in existing_labels:
-                da.sequence = len(sample_attributes) + 1
-                sample_attributes.append(da)
-                existing_labels.add(da.label.strip().upper())
+                if self.is_attribute_valid_and_grounded(
+                    da.label, da.raw_value, da.normalized_value, raw_desc, mpn, classification
+                ):
+                    da.sequence = len(sample_attributes) + 1
+                    sample_attributes.append(da)
+                    existing_labels.add(da.label.strip().upper())
 
         # 5. Content & Description Generation
         report("DESCRIPTION", 65)
@@ -334,6 +342,156 @@ class ProcessingService:
 
         return product
 
+    def is_attribute_valid_and_grounded(
+        self,
+        label: str,
+        raw_val: str,
+        norm_val: str,
+        desc: str,
+        mpn: str,
+        classification: Optional[ClassificationDataSchema] = None
+    ) -> bool:
+        """
+        Precision gate: Validates that candidate dynamic attributes are:
+        1. Fully supported and contextually grounded in source evidence (CONTEXT > REGEX).
+        2. Relevant to the specific product category (product-type-aware extraction).
+        3. NOT an arbitrary MPN fragment, platform code (e.g. M18, M12), or ungrounded number.
+        4. Prefer missing over incorrect: if unsupported or doubtful, discard.
+        """
+        if not label or not raw_val or not str(raw_val).strip():
+            return False
+        
+        lbl_upper = label.strip().upper()
+        raw_upper = str(raw_val).strip().upper()
+        norm_upper = str(norm_val).strip().upper() if norm_val else raw_upper
+        desc_upper = (desc or "").upper()
+        mpn_upper = (mpn or "").strip().upper()
+        classpath = classification.classpath.upper() if classification and classification.classpath else ""
+        fine_class = classification.fine_class.upper() if classification and classification.fine_class else ""
+        class_corpus = f"{classpath} {fine_class}"
+
+        # 1. Reject identity fields that must never be attributes
+        if lbl_upper in ["MANUFACTURER PART NUMBER", "PRIMARY BRAND", "MANUFACTURER", "BRAND", "MPN", "SKU"]:
+            return False
+
+        # 2. Reject placeholder / null / ungrounded values
+        if raw_upper in ["UNKNOWN", "N/A", "NONE", "NULL", "UNCLASSIFIED", "--", "-", "N / A"]:
+            return False
+
+        # 3. MPN token protection: extract tokens from MPN
+        mpn_tokens = set()
+        if mpn_upper:
+            mpn_tokens.add(mpn_upper)
+            parts = [p for p in re.split(r'[-/._\s]+', mpn_upper) if p]
+            for p in parts:
+                if len(p) >= 2:
+                    mpn_tokens.add(p)
+            for i in range(len(parts) - 1):
+                mpn_tokens.add(f"{parts[i]}-{parts[i+1]}")
+                mpn_tokens.add(f"{parts[i]}/{parts[i+1]}")
+
+        # 4. Domain / Category detection
+        is_abrasive = any(k in class_corpus or k in desc_upper for k in [
+            "ABRASIVE", "DISC", "WHEEL", "CUT-OFF", "CUT OFF", "GRIND", "SANDING", "FILM DISC", "FLAP DISC", "HIOLIT", "ABRANET", "STIKIT"
+        ])
+        is_lighting = any(k in class_corpus or k in desc_upper for k in [
+            "LIGHTING", "BULB", "LAMP", "LUMINAIRE", "FLOODLIGHT", "LED BULB", "A19", "BR30", "PAR38"
+        ])
+        is_fastener = any(k in class_corpus or k in desc_upper for k in [
+            "FASTENER", "SCREW", "BOLT", "NUT", "WASHER", "CAP SCREW", "HEX BOLT", "MACHINE SCREW", "WOOD SCREW"
+        ])
+        is_organizer = any(k in class_corpus or k in desc_upper for k in [
+            "ORGANIZER", "STORAGE", "BOX", "BIN", "CABINET", "TOTE", "CASE", "CHEST", "DRAWER", "LUMBER", "DECKING"
+        ])
+        is_tool = any(k in class_corpus or k in desc_upper for k in [
+            "TOOL", "SNIP", "SNIPS", "CRIMPER", "PLIERS", "CUTTER", "WRENCH", "SHEARS", "DRILL", "SAW", "HACKZALL"
+        ])
+        is_electrical = is_lighting or any(k in class_corpus or k in desc_upper for k in [
+            "ELECTRICAL", "BREAKER", "SWITCH", "RECEPTACLE", "OUTLET", "WIRE", "CABLE", "CONTACTOR", "RELAY", "FUSE",
+            "MOTOR", "THERMOSTAT", "HEAT PUMP", "WATT", "VOLT", "VAC", "VDC", "AMPERAGE", "AMP", "POWERED", "ELECTRIC"
+        ])
+
+        # 5. Attribute-specific contextual validation
+
+        # THREAD_SIZE
+        if lbl_upper in ["THREAD SIZE", "THREAD_SIZE", "THREAD"]:
+            # Never on abrasives, cut-off wheels, or organizers
+            if is_abrasive or is_organizer:
+                return False
+            # If it's an MPN fragment, absolutely reject
+            if raw_upper in mpn_tokens or norm_upper in mpn_tokens:
+                return False
+            # Must have thread context or verified fastener thread pattern
+            has_thread_ctx = any(k in desc_upper for k in ["THREAD", "THREADED", "THREADS", "NPT", "UNC", "UNF", "TPI", "PITCH"])
+            is_valid_fastener_pattern = bool(
+                re.search(r'\b(?:\d+/\d+-\d+|#(?:[0-9]|1[0-2])-\d{2}|[0-9]{1,2}-\d{2})\b', raw_upper) or
+                re.search(r'\bM\d+\s*[xX]\s*\d+\b', raw_upper)
+            )
+            if not (has_thread_ctx or (is_fastener and is_valid_fastener_pattern)):
+                return False
+            # Arbitrary numbers like 49-94 or 332-120 must fail
+            if re.match(r'^\d{2,}-\d{2,}$', raw_upper):
+                parts = raw_upper.split("-")
+                gauge = int(parts[0]) if parts[0].isdigit() else -1
+                if gauge > 12:
+                    return False
+            # Bare platform numbers like M18, M12 are not thread sizes
+            if re.match(r'^M(?:12|18|28|36)$', raw_upper):
+                if not any(k in desc_upper for k in ["THREAD", "PITCH"]):
+                    return False
+
+        # BASE_TYPE
+        if lbl_upper in ["BASE TYPE", "BASE_TYPE", "LAMP BASE", "SOCKET BASE"]:
+            if is_organizer or is_abrasive or is_tool or not (is_lighting or "BASE" in desc_upper or "SOCKET" in desc_upper):
+                return False
+            if "MEDIUM" in raw_upper and not any(k in desc_upper for k in ["MED BASE", "MEDIUM BASE", "E26", "BASE: MEDIUM", "LAMP", "BULB"]):
+                return False
+
+        # VOLTAGE
+        if lbl_upper in ["VOLTAGE", "OPERATING VOLTAGE", "NOMINAL VOLTAGE"]:
+            if (is_abrasive or is_organizer or is_fastener) and not is_electrical:
+                return False
+            # Bare M18 / M12 or MPN fragments are NOT voltage
+            if raw_upper in mpn_tokens or norm_upper in mpn_tokens:
+                desc_no_mpn = desc_upper.replace(mpn_upper, " ")
+                if not re.search(r'\b' + re.escape(raw_upper) + r'\s*(?:V|VOLTS?|VAC|VDC)\b', desc_no_mpn):
+                    return False
+            has_volt_ctx = any(k in desc_upper for k in ["VOLT", "VOLTS", "VAC", "VDC", "VOLTAGE", "OPERATES AT"]) or re.search(r'\b\d+\s*V\b', desc_upper)
+            if not has_volt_ctx:
+                return False
+
+        # AMPERAGE
+        if lbl_upper in ["AMPERAGE", "CURRENT", "RATED CURRENT", "AMPS"]:
+            if (is_abrasive or is_organizer or is_fastener) and not is_electrical:
+                return False
+            if raw_upper in mpn_tokens or norm_upper in mpn_tokens:
+                return False
+            has_amp_ctx = any(k in desc_upper for k in ["AMP", "AMPS", "AMPERAGE", "CURRENT"]) or (is_electrical and re.search(r'\b\d+\s*A\b', desc_upper))
+            if not has_amp_ctx:
+                return False
+
+        # GRIT
+        if lbl_upper in ["GRIT", "ABRASIVE GRIT"]:
+            if not is_abrasive:
+                return False
+            has_grit_ctx = bool(re.search(r'\b(?:P\d{2,4}|\d{2,4}\s*GRIT|GRIT)\b', desc_upper))
+            if not has_grit_ctx:
+                return False
+
+        # TOOL_TYPE
+        if lbl_upper in ["TOOL TYPE", "TOOL_TYPE"]:
+            if not is_tool:
+                return False
+
+        # LENGTH
+        if lbl_upper == "LENGTH":
+            # On cut-off wheels and abrasive discs, dimensions are Dia x Thk x Arbor, not Length
+            if is_abrasive and any(k in desc_upper for k in ["CUT-OFF", "CUT OFF", "GRINDING WHEEL", "DISC"]):
+                if not any(k in desc_upper for k in ["LENGTH", "LONG", "FT", "FEET"]):
+                    return False
+
+        return True
+
     def discover_dynamic_attributes(
         self,
         mpn: str,
@@ -355,6 +513,40 @@ class ProcessingService:
         classpath = classification.classpath if classification else ""
         class_upper = classpath.upper()
         raw_row = raw_row or {}
+        mpn_upper = (mpn or "").strip().upper()
+
+        # Extract MPN tokens to prevent any MPN fragments from becoming engineering attributes
+        mpn_tokens = set()
+        if mpn_upper:
+            mpn_tokens.add(mpn_upper)
+            parts = [p for p in re.split(r'[-/._\s]+', mpn_upper) if p]
+            for p in parts:
+                if len(p) >= 2:
+                    mpn_tokens.add(p)
+            for i in range(len(parts) - 1):
+                mpn_tokens.add(f"{parts[i]}-{parts[i+1]}")
+                mpn_tokens.add(f"{parts[i]}/{parts[i+1]}")
+
+        # Domain flags
+        is_abrasive = any(k in class_upper or k in desc_upper for k in [
+            "ABRASIVE", "DISC", "WHEEL", "CUT-OFF", "CUT OFF", "GRIND", "SANDING", "FILM DISC", "FLAP DISC", "HIOLIT", "ABRANET", "STIKIT"
+        ])
+        is_lighting = any(k in class_upper or k in desc_upper for k in [
+            "LIGHTING", "BULB", "LAMP", "LUMINAIRE", "FLOODLIGHT", "LED BULB", "A19", "BR30", "PAR38"
+        ])
+        is_fastener = any(k in class_upper or k in desc_upper for k in [
+            "FASTENER", "SCREW", "BOLT", "NUT", "WASHER", "CAP SCREW", "HEX BOLT", "MACHINE SCREW", "WOOD SCREW"
+        ])
+        is_organizer = any(k in class_upper or k in desc_upper for k in [
+            "ORGANIZER", "STORAGE", "BOX", "BIN", "CABINET", "TOTE", "CASE", "CHEST", "DRAWER", "LUMBER", "DECKING"
+        ])
+        is_tool = any(k in class_upper or k in desc_upper for k in [
+            "HAND TOOL", "POWER TOOL", "SNIP", "SNIPS", "CRIMPER", "PLIERS", "CUTTER", "WRENCH", "SHEARS"
+        ])
+        is_electrical = is_lighting or any(k in class_upper or k in desc_upper for k in [
+            "ELECTRICAL", "BREAKER", "SWITCH", "RECEPTACLE", "OUTLET", "WIRE", "CABLE", "CONTACTOR", "RELAY", "FUSE",
+            "MOTOR", "THERMOSTAT", "HEAT PUMP", "WATT", "VOLT", "VAC", "VDC", "AMPERAGE", "AMP", "POWERED", "ELECTRIC"
+        ])
 
         seq = 1
         added_labels = set()
@@ -365,11 +557,14 @@ class ProcessingService:
                 return
             lbl_clean = label.strip()
             lbl_upper = lbl_clean.upper()
-            # Absolute rule: Never create MPN or Brand as dynamic attributes
-            if lbl_upper in ["MANUFACTURER PART NUMBER", "PRIMARY BRAND", "MANUFACTURER", "BRAND", "MPN"]:
+            if lbl_upper in ["MANUFACTURER PART NUMBER", "PRIMARY BRAND", "MANUFACTURER", "BRAND", "MPN", "SKU"]:
                 return
             if lbl_upper in added_labels:
                 return
+            # Gate every candidate through precision filter
+            if not self.is_attribute_valid_and_grounded(lbl_clean, raw_val, norm_val, desc, mpn, classification):
+                return
+
             clean_uom = local_cleaner.normalize_uom(uom) if uom else ""
             src_str = source or f"Product Evidence ({mpn})"
             attrs.append(
@@ -403,6 +598,7 @@ class ProcessingService:
             "AVIATION SNIP", "AVIATION SNIPS", "SNIP", "SNIPS", "CRIMPER", "PLIERS", "CUTTER", "WRENCH", "SCREWDRIVER",
             "CAP SCREW", "HEX SCREW", "MACHINE SCREW", "WOOD SCREW", "HEX BOLT", "BOLT", "NUT", "WASHER",
             "ABRASIVE FILM DISC", "ABRASIVE DISC", "FILM DISC", "FLAP DISC", "GRINDING WHEEL", "CUT-OFF WHEEL", "SANDING DISC",
+            "DEEP MEDIUM ORGANIZER", "ORGANIZER", "STORAGE BOX", "TOOL BOX",
             "THERMOSTAT", "HEAT PUMP", "AIR FILTER", "DECKING BOARD", "COMPOSITE DECKING",
             "CENTRIFUGAL PUMP", "WATER PUMP", "UTILITY BLADE", "BLADE"
         ]:
@@ -411,6 +607,8 @@ class ProcessingService:
                     product_type = "Abrasive Film Disc"
                 elif explicit_type == "COUPLING" and any(k in desc_upper for k in ["BRASS", "PIPE", "FNPT", "MNPT", "PLUMBING"]):
                     product_type = "Coupling Fitting"
+                elif explicit_type == "DEEP MEDIUM ORGANIZER":
+                    product_type = "Organizer"
                 else:
                     product_type = explicit_type.title()
                 break
@@ -443,17 +641,18 @@ class ProcessingService:
         m_sz = re.search(r'\b(1/16|1/8|3/16|1/4|5/16|3/8|7/16|1/2|5/8|3/4|7/8|1[- ]?1/4|1[- ]?1/2|2[- ]?1/2)(?:\s*(?:IN(?:CH(?:ES)?)?|"))?\b|\b([1-4])\s*(?:IN(?:CH(?:ES)?)?|")\b', desc_upper)
         if m_sz:
             sz_val = (m_sz.group(1) or m_sz.group(2)).replace(" ", "-")
-            add_attr("Nominal Size", sz_val, sz_val, "IN", "Nominal product size specification")
-            if any(k in class_upper or k in desc_upper for k in ["VALVE", "VLV", "FITTING", "PIPE", "CPLG", "TUBING", "HOSE", "PLUMBING", "PNEUMATIC"]):
-                add_attr("Connection Size", sz_val, sz_val, "IN", "Inlet/outlet connection port size")
+            if sz_val not in mpn_tokens:
+                add_attr("Nominal Size", sz_val, sz_val, "IN", "Nominal product size specification")
+                if any(k in class_upper or k in desc_upper for k in ["VALVE", "VLV", "FITTING", "PIPE", "CPLG", "TUBING", "HOSE", "PLUMBING", "PNEUMATIC"]):
+                    add_attr("Connection Size", sz_val, sz_val, "IN", "Inlet/outlet connection port size")
 
-        # Length (Feet or Inches)
+        # Length (Feet or Inches) - NOT for abrasive cut-off discs
         m_len_ft = re.search(r'\b(8|10|12|16|20|24|50|100|250|500)\s*(?:FT|FOOT|FEET|\')\b', desc_upper)
         if m_len_ft:
             add_attr("Length", f"{m_len_ft.group(1)} FT", f"{m_len_ft.group(1)} FT", "FT", "Nominal overall length")
-        else:
+        elif not is_abrasive:
             m_len_in = re.search(r'(?:X\s*)(\d+(?:[./]\d+)?)\s*(?:IN(?:CH(?:ES)?)?|"|\b)', desc_upper)
-            if m_len_in and m_len_in.group(1) not in ["0.045", "1/16"]:
+            if m_len_in and m_len_in.group(1) not in ["0.045", "1/16"] and m_len_in.group(1) not in mpn_tokens:
                 add_attr("Length", m_len_in.group(1), m_len_in.group(1), "IN", "Fastener or tool shank length")
 
         # Board / Dimension Width
@@ -469,28 +668,43 @@ class ProcessingService:
                 break
 
         # Abrasive Wheel / Disc Dimensions
-        if any(k in class_upper or k in desc_upper for k in ["ABRASIVE", "DISC", "WHEEL", "CUT-OFF", "GRIND", "FILM"]):
-            m_dia = re.search(r'\b(4[- ]?1/2|4\.5|5|6|7|9|12|14)\s*(?:["\']|IN(?:CH(?:ES)?)?|\b)', desc_upper)
-            if m_dia:
-                val = m_dia.group(1).replace(" ", "-")
+        if is_abrasive:
+            # Check 3-dimensional pattern: Diameter x Thickness x Arbor (e.g. 4-1/2 in. x .045 in. x 7/8 in.)
+            m_3dim = re.search(r'\b(4[- ]?1/2|4\.5|[4-9]|12|14)\s*(?:IN(?:CH(?:ES)?)?\.?|"|\b)?\s*[xX]\s*(0?\.\d+|\d+/\d+)\s*(?:IN(?:CH(?:ES)?)?\.?|"|\b)?\s*[xX]\s*([0-9/.-]+(?:-\d+)?)\s*(?:IN(?:CH(?:ES)?)?\.?|MM|"|\b)?', desc_upper)
+            if m_3dim:
+                d_val = m_3dim.group(1).replace(" ", "-")
+                t_val = m_3dim.group(2)
+                a_val = m_3dim.group(3)
                 if "DISC" in desc_upper or "FILM" in desc_upper:
-                    add_attr("Disc Diameter", val, val, "IN", "Abrasive disc outer diameter")
-                add_attr("Wheel Diameter", val, val, "IN", "Abrasive wheel outer diameter")
+                    add_attr("Disc Diameter", d_val, d_val, "IN", "Abrasive disc outer diameter")
+                add_attr("Wheel Diameter", d_val, d_val, "IN", "Abrasive wheel outer diameter")
+                add_attr("Wheel Thickness", t_val, t_val, "IN", "Abrasive wheel thickness/kerf")
+                if a_val not in mpn_tokens:
+                    add_attr("Arbor Size", a_val, a_val, "IN" if "/" in a_val else "", "Wheel mounting arbor size")
+            else:
+                m_dia = re.search(r'\b(4[- ]?1/2|4\.5|5|6|7|9|12|14)\s*(?:["\']|IN(?:CH(?:ES)?)?\.?|\b)', desc_upper)
+                if m_dia:
+                    val = m_dia.group(1).replace(" ", "-")
+                    if "DISC" in desc_upper or "FILM" in desc_upper:
+                        add_attr("Disc Diameter", val, val, "IN", "Abrasive disc outer diameter")
+                    add_attr("Wheel Diameter", val, val, "IN", "Abrasive wheel outer diameter")
 
-            m_thk = re.search(r'\b(0\.\d+|\d+/\d+)\s*(?:["\']|IN(?:CH(?:ES)?)?|\b)', desc_upper)
-            if m_thk and (not m_dia or m_thk.group(1) != m_dia.group(1)):
-                val = m_thk.group(1)
-                add_attr("Wheel Thickness", val, val, "IN", "Abrasive wheel thickness/kerf")
+                m_thk = re.search(r'(?:X\s*|\b)(0?\.\d+|(?<!-)(?:1/16|1/8|3/32|1/32|3/16|1/4))\s*(?:["\']|IN(?:CH(?:ES)?)?\.?|\b)', desc_upper)
+                if m_thk and (not m_dia or m_thk.group(1) not in m_dia.group(1)):
+                    val = m_thk.group(1)
+                    add_attr("Wheel Thickness", val, val, "IN", "Abrasive wheel thickness/kerf")
 
-            m_arbor = re.search(r'(?:ARBOR|BORE|HOLE|X)\s*([0-9/.-]+(?:-\d+)?)\s*(?:IN|MM|")?', desc_upper)
-            if m_arbor and m_arbor.group(1) not in ["0.045", "1/16"]:
-                arb_val = m_arbor.group(1)
-                add_attr("Arbor Size", arb_val, arb_val, "IN" if "/" in arb_val else "", "Wheel mounting arbor size")
+                m_arbor = re.search(r'(?:ARBOR|BORE|HOLE)\s*(?:SIZE\s*)?[:=]?\s*([0-9/.-]+(?:-\d+)?)\s*(?:IN|MM|"|\b)?|\b([0-9/.-]+(?:-\d+)?)\s*(?:IN|MM|")?\s*(?:ARBOR|BORE)\b|(?:[xX]\s*[0-9/.-]+\s*(?:IN(?:CH(?:ES)?)?\.?|")?\s*[xX]\s*)([0-9/.-]+(?:-\d+)?)', desc_upper)
+                if m_arbor:
+                    arb_val = m_arbor.group(1) or m_arbor.group(2) or m_arbor.group(3)
+                    if arb_val and arb_val not in ["0.045", "1/16", ".045"] and arb_val not in mpn_tokens:
+                        add_attr("Arbor Size", arb_val, arb_val, "IN" if "/" in arb_val else "", "Wheel mounting arbor size")
 
-            m_grit = re.search(r'\b([P]?\d{2,4})\s*(?:GRIT|G\b)', desc_upper)
+            m_grit = re.search(r'\b(P\d{2,4}|\d{2,4}\s*GRIT)\b', desc_upper)
             if m_grit:
-                add_attr("Grit", m_grit.group(1), m_grit.group(1), "", "Abrasive grit rating")
-                add_attr("Abrasive Grit", m_grit.group(1), m_grit.group(1), "", "Abrasive grit rating")
+                raw_g = m_grit.group(1).replace("GRIT", "").strip()
+                add_attr("Grit", raw_g, raw_g, "", "Abrasive grit rating")
+                add_attr("Abrasive Grit", raw_g, raw_g, "", "Abrasive grit rating")
 
             for mat in ["ALUMINUM OXIDE", "SILICON CARBIDE", "ZIRCONIA ALUMINA", "CERAMIC", "DIAMOND"]:
                 if mat in desc_upper:
@@ -502,83 +716,100 @@ class ProcessingService:
                 add_attr("Maximum RPM", m_rpm.group(1), m_rpm.group(1), "RPM", "Safe maximum operating rotational speed")
 
         # 4. Fluid & Pneumatic Connections & Pressure
-        connection_types = ["FNPT", "MNPT", "NPT", "PUSH-TO-CONNECT", "COMPRESSION", "BARBED", "SWEAT", "PRESS", "PEX", "FLANGED", "SOCKET", "TRI-CLAMP"]
-        for ct in connection_types:
-            if re.search(r'\b' + re.escape(ct) + r'\b', desc_upper):
-                add_attr("Connection Type", ct, ct, "", "Plumbing or pneumatic joint connection style")
-                break
+        if any(k in class_upper or k in desc_upper for k in ["VALVE", "VLV", "FITTING", "PIPE", "CPLG", "PLUMBING", "PNEUMATIC"]):
+            connection_types = ["FNPT", "MNPT", "NPT", "PUSH-TO-CONNECT", "COMPRESSION", "BARBED", "SWEAT", "PRESS", "PEX", "FLANGED", "SOCKET", "TRI-CLAMP"]
+            for ct in connection_types:
+                if re.search(r'\b' + re.escape(ct) + r'\b', desc_upper):
+                    add_attr("Connection Type", ct, ct, "", "Plumbing or pneumatic joint connection style")
+                    break
 
-        m_psi = re.search(r'\b(\d{2,5})\s*(?:PSI|BAR|KPA|WOG|CWP)\b', desc_upper)
-        if m_psi:
-            add_attr("Pressure Rating", f"{m_psi.group(1)} PSI", f"{m_psi.group(1)} PSI", "PSI", "Maximum rated operating pressure")
+            m_psi = re.search(r'\b(\d{2,5})\s*(?:PSI|BAR|KPA|WOG|CWP)\b', desc_upper)
+            if m_psi:
+                add_attr("Pressure Rating", f"{m_psi.group(1)} PSI", f"{m_psi.group(1)} PSI", "PSI", "Maximum rated operating pressure")
 
-        # 5. Electrical & Lighting
-        m_watt = re.search(r'\b(\d+(?:\.\d+)?)\s*(?:W|WATT|WATTS)\b', desc_upper)
-        if m_watt:
-            add_attr("Wattage", m_watt.group(1), m_watt.group(1), "W", "Electrical power consumption rating")
+        # 5. Electrical & Lighting (Strict Contextual Evidence Only)
+        if is_electrical:
+            m_watt = re.search(r'\b(\d+(?:\.\d+)?)\s*(?:W|WATT|WATTS)\b', desc_upper)
+            if m_watt and m_watt.group(1) not in mpn_tokens:
+                add_attr("Wattage", m_watt.group(1), m_watt.group(1), "W", "Electrical power consumption rating")
 
-        m_volt = re.search(r'\b(12|24|120|208|240|277|480|600)\s*(?:V|VOLTS?|VAC|VDC)\b', desc_upper)
-        if m_volt:
-            add_attr("Voltage", m_volt.group(1), m_volt.group(1), "V", "Nominal operating voltage")
+            # Voltage with contextual semantic association (e.g. 'operates at 120 volts', '120V', '24V')
+            m_volt = re.search(r'(?:OPERATES\s+AT\s+|RATED\s+(?:FOR|AT)\s+|VOLTAGE\s*[:=]?\s*|\b)(12|24|120|208|230|240|277|480|600)\s*(?:V|VOLTS?|VAC|VDC)\b', desc_upper)
+            if m_volt:
+                volt_candidate = m_volt.group(1)
+                # Ensure it is not an MPN fragment without context
+                desc_no_mpn = desc_upper.replace(mpn_upper, " ")
+                if re.search(r'\b' + volt_candidate + r'\s*(?:V|VOLTS?|VAC|VDC)\b', desc_no_mpn):
+                    add_attr("Voltage", volt_candidate, volt_candidate, "V", "Nominal operating voltage")
 
-        m_amp = re.search(r'\b(\d+(?:\.\d+)?)\s*(?:A|AMP|AMPS)\b', desc_upper)
-        if m_amp:
-            add_attr("Amperage", m_amp.group(1), m_amp.group(1), "A", "Rated electrical current")
+            # Amperage with explicit electrical context
+            m_amp = re.search(r'(?:AMPERAGE\s*[:=]?\s*|\b)(\d+(?:\.\d+)?)\s*(?:AMPS?|AMPERES?)\b|\b(\d+(?:\.\d+)?)\s*A\b', desc_upper)
+            if m_amp:
+                amp_candidate = m_amp.group(1) or m_amp.group(2)
+                if amp_candidate not in mpn_tokens:
+                    add_attr("Amperage", amp_candidate, amp_candidate, "A", "Rated electrical current")
 
-        for shape in ["A19", "BR30", "PAR38", "PAR20", "PAR30", "T8", "T5", "MR16", "GU10", "ED17", "G25", "B11"]:
-            if re.search(r'\b' + shape + r'\b', desc_upper):
-                add_attr("Bulb Shape", shape, shape, "", "ANSI bulb shape code")
-                break
+            if is_lighting:
+                for shape in ["A19", "BR30", "PAR38", "PAR20", "PAR30", "T8", "T5", "MR16", "GU10", "ED17", "G25", "B11"]:
+                    if re.search(r'\b' + shape + r'\b', desc_upper):
+                        add_attr("Bulb Shape", shape, shape, "", "ANSI bulb shape code")
+                        break
 
-        for base in ["E26", "MEDIUM", "MOGUL", "E39", "CANDELABRA", "E12", "GU24", "BI-PIN", "G13"]:
-            if re.search(r'\b' + base + r'\b', desc_upper):
-                b_name = "E26 Medium" if base in ["E26", "MEDIUM"] else ("E12 Candelabra" if base in ["E12", "CANDELABRA"] else base.title())
-                add_attr("Base Type", b_name, b_name, "", "Lamp socket base interface")
-                break
+                for base in ["E26", "E39", "E12", "GU24", "GU10", "BI-PIN", "G13", "MOGUL", "CANDELABRA"]:
+                    if re.search(r'\b' + base + r'\b', desc_upper):
+                        b_name = "E26 Medium" if base == "E26" else ("E12 Candelabra" if base in ["E12", "CANDELABRA"] else base.title())
+                        add_attr("Base Type", b_name, b_name, "", "Lamp socket base interface")
+                        break
+                # Only match 'MEDIUM' if explicitly accompanied by lighting base keywords
+                if re.search(r'\b(?:MED(?:IUM)?\s*BASE|BASE\s*:\s*MED(?:IUM)?|E26\s*MEDIUM|MEDIUM\s*SCREW\s*BASE)\b', desc_upper):
+                    add_attr("Base Type", "E26 Medium", "E26 Medium", "", "Lamp socket base interface")
 
-        m_cct = re.search(r'\b([2-6]\d00)\s*K\b', desc_upper)
-        if m_cct:
-            add_attr("Color Temperature", f"{m_cct.group(1)}K", f"{m_cct.group(1)}K", "K", "Correlated color temperature rating")
+                m_cct = re.search(r'\b([2-6]\d00)\s*K\b', desc_upper)
+                if m_cct:
+                    add_attr("Color Temperature", f"{m_cct.group(1)}K", f"{m_cct.group(1)}K", "K", "Correlated color temperature rating")
 
-        m_lm = re.search(r'\b(\d{3,5})\s*(?:LM|LUMENS?)\b', desc_upper)
-        if m_lm:
-            add_attr("Lumens", m_lm.group(1), m_lm.group(1), "LM", "Luminous flux output")
+                m_lm = re.search(r'\b(\d{3,5})\s*(?:LM|LUMENS?)\b', desc_upper)
+                if m_lm:
+                    add_attr("Lumens", m_lm.group(1), m_lm.group(1), "LM", "Luminous flux output")
 
-        if "DIMMABLE" in desc_upper and "NON-DIMMABLE" not in desc_upper:
-            add_attr("Dimmable", "Yes", "Yes", "", "Dimming capability")
-        elif "NON-DIMMABLE" in desc_upper:
-            add_attr("Dimmable", "No", "No", "", "Dimming capability")
+                if "DIMMABLE" in desc_upper and "NON-DIMMABLE" not in desc_upper:
+                    add_attr("Dimmable", "Yes", "Yes", "", "Dimming capability")
+                elif "NON-DIMMABLE" in desc_upper:
+                    add_attr("Dimmable", "No", "No", "", "Dimming capability")
 
-        # 6. Fasteners & Mechanical Screws
-        m_thread = re.search(r'\b(\d+/\d+-\d+|\d+-\d+|M\d+(?:\.\d+)?)\b', desc_upper)
-        if m_thread:
-            add_attr("Thread Size", m_thread.group(1), m_thread.group(1), "", "Screw/bolt thread size and pitch")
+        # 6. Fasteners & Mechanical Screws (Strict MPN Protection)
+        if is_fastener or any(k in desc_upper for k in ["THREAD", "THREADED", "UNC", "UNF", "TPI"]):
+            # Specific fastener thread pattern: fraction-TPI (e.g. 1/4-20) or gauge-TPI (e.g. 10-24) or metric pitch (e.g. M8x1.25)
+            m_thread = re.search(r'\b(\d+/\d+-\d+|#(?:[0-9]|1[0-2])-\d{2}|(?:[1-9]|1[0-2])-\d{2}|M\d+\s*[xX]\s*\d+(?:\.\d+)?)\b', desc_upper)
+            if m_thread and m_thread.group(1) not in mpn_tokens:
+                add_attr("Thread Size", m_thread.group(1), m_thread.group(1), "", "Screw/bolt thread size and pitch")
 
-        for hd in ["HEX HEAD", "PAN HEAD", "FLAT HEAD", "SOCKET HEAD", "ROUND HEAD", "TRUSS HEAD", "BUTTON HEAD"]:
-            if hd in desc_upper:
-                add_attr("Head Type", hd.title(), hd.title(), "", "Fastener head style")
-                add_attr("Fastener Head Style", hd.title(), hd.title(), "", "Fastener head style")
-                break
+            for hd in ["HEX HEAD", "PAN HEAD", "FLAT HEAD", "SOCKET HEAD", "ROUND HEAD", "TRUSS HEAD", "BUTTON HEAD"]:
+                if hd in desc_upper:
+                    add_attr("Head Type", hd.title(), hd.title(), "", "Fastener head style")
+                    add_attr("Fastener Head Style", hd.title(), hd.title(), "", "Fastener head style")
+                    break
 
-        for fn in ["ZINC PLATED", "HOT DIPPED GALVANIZED", "BLACK OXIDE", "YELLOW ZINC", "PLAIN"]:
-            if fn in desc_upper:
-                add_attr("Finish", fn.title(), fn.title(), "", "Surface protective coating")
-                break
+            for fn in ["ZINC PLATED", "HOT DIPPED GALVANIZED", "BLACK OXIDE", "YELLOW ZINC", "PLAIN"]:
+                if fn in desc_upper:
+                    add_attr("Finish", fn.title(), fn.title(), "", "Surface protective coating")
+                    break
 
-        # 7. Hand & Power Tools / Snips
-        for tt in ["AVIATION SNIPS", "OFFSET SNIPS", "CRIMPER", "DIAGONAL CUTTERS", "LONG NOSE PLIERS", "WIRE STRIPPER", "SHEARS"]:
-            if tt in desc_upper:
-                add_attr("Tool Type", tt.title(), tt.title(), "", "Hand tool design classification")
-                break
+        # 7. Hand Tools & Cutters
+        if is_tool:
+            for tt in ["AVIATION SNIPS", "OFFSET SNIPS", "CRIMPER", "DIAGONAL CUTTERS", "LONG NOSE PLIERS", "WIRE STRIPPER", "SHEARS"]:
+                if tt in desc_upper:
+                    add_attr("Tool Type", tt.title(), tt.title(), "", "Hand tool design classification")
+                    break
 
-        m_ga = re.search(r'\b(\d{1,2})\s*(?:GA|GAUGE)\b', desc_upper)
-        if m_ga:
-            add_attr("Cutting Capacity", f"{m_ga.group(1)} Gauge", f"{m_ga.group(1)} Gauge", "", "Maximum cutting material thickness")
+            m_ga = re.search(r'\b(\d{1,2})\s*(?:GA|GAUGE)\b', desc_upper)
+            if m_ga and m_ga.group(1) not in mpn_tokens:
+                add_attr("Cutting Capacity", f"{m_ga.group(1)} Gauge", f"{m_ga.group(1)} Gauge", "", "Maximum cutting material thickness")
 
-        for ct_dir in ["LEFT CUT", "RIGHT CUT", "STRAIGHT CUT", "BULLDOG"]:
-            if ct_dir in desc_upper:
-                add_attr("Cut Direction", ct_dir.title(), ct_dir.title(), "", "Cutting blade orientation")
-                break
+            for ct_dir in ["LEFT CUT", "RIGHT CUT", "STRAIGHT CUT", "BULLDOG"]:
+                if ct_dir in desc_upper:
+                    add_attr("Cut Direction", ct_dir.title(), ct_dir.title(), "", "Cutting blade orientation")
+                    break
 
         # 8. Appliances
         if any(k in class_upper or k in desc_upper for k in ["APPLIANCE", "DISHWASHER", "FRIDGE", "REFRIGERATOR"]):
@@ -593,7 +824,7 @@ class ProcessingService:
         m_qty = re.search(r'(?:PACK OF\s*(\d+)|PK OF\s*(\d+)|\bBOX OF\s*(\d+)|\bBAG OF\s*(\d+)|\bQTY:?\s*(\d+)|\b(\d+)\s*(?:PK|PACK|PC|PCS)\b)', desc_upper)
         if m_qty:
             val = next((g for g in m_qty.groups() if g is not None), None)
-            if val:
+            if val and val not in mpn_tokens:
                 add_attr("Package Quantity", val, val, "", "Item packaging count")
                 add_attr("Pack Quantity", val, val, "", "Item packaging count")
 
