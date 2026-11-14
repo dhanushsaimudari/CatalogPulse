@@ -12,13 +12,15 @@ from app.evaluation.evaluator import evaluator_engine
 
 class TestSanityDataset(unittest.TestCase):
     def test_process_sanity_dataset(self):
-        sanity_csv_path = os.path.join(os.path.dirname(__file__), "..", "storage_data", "inputs", "import-1e365f74_sortolog_sanity_test.csv")
+        fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "catalogpulse_sanity_test.csv")
+        legacy_path = os.path.join(os.path.dirname(__file__), "..", "storage_data", "inputs", "import-1e365f74_sortolog_sanity_test.csv")
+        sanity_csv_path = fixture_path if os.path.exists(fixture_path) else legacy_path
         self.assertTrue(os.path.exists(sanity_csv_path), "Sanity CSV must exist")
 
         with open(sanity_csv_path, "rb") as f:
             content_bytes = f.read()
 
-        import_id, total_count, candidates = ingestion_service.process_import("sortolog_sanity_test.csv", content_bytes)
+        import_id, total_count, candidates = ingestion_service.process_import("catalogpulse_sanity_test.csv", content_bytes)
         self.assertEqual(len(candidates), 15, "Expected exactly 15 candidate rows in sanity test dataset")
 
         session = session_manager.create_session("test-sanity-session-01", seed_demo=False)

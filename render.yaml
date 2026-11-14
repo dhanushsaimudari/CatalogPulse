@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: sortlog-iq-backend
+    name: catalogpulse-ai-backend
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
@@ -16,6 +16,12 @@ services:
         value: 0.0.0.0
       - key: FRONTEND_URL
         sync: false
+      - key: PRIMARY_AI_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
       - key: WATSONX_API_KEY
         sync: false
       - key: WATSONX_PROJECT_ID
@@ -24,7 +30,3 @@ services:
         value: https://us-south.ml.cloud.ibm.com
       - key: WATSONX_MODEL_ID
         value: meta-llama/llama-3-3-70b-instruct
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: GEMINI_MODEL
-        value: gemini-1.5-flash
