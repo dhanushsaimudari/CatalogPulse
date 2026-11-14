@@ -4,10 +4,14 @@ from pydantic import field_validator
 from typing import Optional, Any
 
 class Settings(BaseSettings):
-    APP_NAME: str = "SORTOLOG IQ"
+    APP_NAME: str = "CatalogPulse AI"
+    APP_TAGLINE: str = "From raw industrial data to verified, commerce-ready catalogs."
     APP_ENV: str = "development"
     DEBUG: bool = True
     
+    # AI Provider Selection
+    PRIMARY_AI_PROVIDER: str = "gemini"
+
     # API Server Config
     HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
@@ -49,15 +53,15 @@ class Settings(BaseSettings):
     MAX_AI_REQUESTS_PER_SESSION: int = 500
     MAX_AI_TOKENS_PER_SESSION: int = 200000
     
-    # Primary AI Provider: IBM watsonx.ai
+    # Primary AI Provider: Google Gemini API
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+
+    # Secondary AI Provider: IBM watsonx.ai (Optional Fallback)
     WATSONX_API_KEY: Optional[str] = None
     WATSONX_PROJECT_ID: Optional[str] = None
     WATSONX_URL: str = "https://us-south.ml.cloud.ibm.com"
     WATSONX_MODEL_ID: str = "meta-llama/llama-3-3-70b-instruct"
-
-    # Secondary AI Provider: Gemini (Fallback)
-    GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # IBM Cloud Object Storage
     IBM_COS_ENDPOINT: Optional[str] = None

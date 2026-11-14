@@ -41,7 +41,7 @@ export default function UploadPage() {
     { title: 'Taxonomy Classification', desc: 'Predicting 4-tier industrial classification' },
     { title: 'AI Spec Extraction', desc: 'Extracting technical attribute triplets' },
     { title: 'Normalization', desc: 'Normalizing UOMs & commercial standards' },
-    { title: 'Validation Engine', desc: 'Running 252-column deterministic rule checks' },
+    { title: 'Validation Engine', desc: 'Running deterministic industrial rule checks' },
     { title: 'Quality Scoring', desc: 'Calculating explainable quality weights' },
     { title: 'Session Ready', desc: 'Catalogue enriched and ready for review/export' },
   ];
@@ -221,12 +221,12 @@ export default function UploadPage() {
       {/* Header */}
       <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Upload Catalogue Data</h1>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">New Catalog Ingestion</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 font-sans mt-0.5">
-            Ingest real manufacturer/distributor datasets for AI enrichment and quality validation
+            Ingest manufacturer spreadsheets, PDF datasheets, and distributor feeds for AI enrichment
           </p>
         </div>
-        <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">Real File Processing Engine</span>
+        <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">CatalogPulse Ingestion Engine</span>
       </div>
 
       {/* Hidden HTML File Input */}

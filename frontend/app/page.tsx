@@ -58,19 +58,19 @@ export default function HomePage() {
         <div className="space-y-3 max-w-3xl relative z-10">
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-1 rounded text-xs font-mono font-bold bg-blue-100 dark:bg-blue-950 border border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-400">
-              SORTOLOG IQ
+              CATALOGPULSE AI
             </span>
             <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
-              Industrial Product Enrichment Engine
+              Industrial Product Intelligence Platform
             </span>
           </div>
 
           <h1 className="text-3xl md:text-4xl font-extrabold font-mono text-slate-900 dark:text-slate-100 leading-tight">
-            Turn messy data into commerce-ready intelligence.
+            From raw industrial data to verified, commerce-ready catalogs.
           </h1>
 
           <p className="text-sm text-slate-600 dark:text-slate-300 font-sans leading-relaxed">
-            Upload manufacturer and distributor product feeds (CSV, XLSX, PDF, Images) to perform AI enrichment, automated taxonomy classification, rule validation, and Unilog 252-column export.
+            Upload manufacturer spreadsheets, PDF spec sheets, and distributor feeds (CSV, XLSX, PDF, Images). Extract technical attributes, validate specifications with deterministic rules, review source evidence, and export clean, structured product catalogs.
           </p>
 
           <div className="pt-2 flex items-center gap-2 text-xs font-mono text-slate-600 dark:text-slate-400">

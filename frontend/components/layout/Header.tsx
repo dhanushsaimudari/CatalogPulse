@@ -51,10 +51,10 @@ export const Header: React.FC = () => {
       .then((res) => res.json())
       .then((data) => {
         if (data && data.backend === 'ok') {
-          if (data.watsonx === 'available') {
-            setAiBadge({ text: 'WATSONX ACTIVE', variant: 'ACTIVE' });
-          } else if (data.gemini === 'available') {
-            setAiBadge({ text: 'WATSONX → GEMINI', variant: 'FALLBACK' });
+          if (data.gemini === 'available') {
+            setAiBadge({ text: 'GEMINI AI ACTIVE', variant: 'ACTIVE' });
+          } else if (data.watsonx === 'available') {
+            setAiBadge({ text: 'WATSONX FALLBACK', variant: 'FALLBACK' });
           } else {
             setAiBadge({ text: 'LOCAL ENGINE ACTIVE', variant: 'LOCAL' });
           }
@@ -213,12 +213,12 @@ export const Header: React.FC = () => {
 
         <div className="flex items-center gap-2">
           {aiBadge.variant === 'ACTIVE' ? (
-            <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1.5 shadow-xs" title="IBM watsonx.ai Primary Active (meta-llama/llama-3-3-70b-instruct)">
+            <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1.5 shadow-xs" title="Google Gemini AI Primary Active">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               {aiBadge.text}
             </span>
           ) : aiBadge.variant === 'FALLBACK' ? (
-            <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center gap-1.5" title="IBM watsonx.ai unavailable. Gemini API Secondary Fallback active.">
+            <span className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center gap-1.5" title="IBM watsonx.ai Fallback Active">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
               {aiBadge.text}
             </span>

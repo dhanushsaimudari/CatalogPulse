@@ -60,5 +60,10 @@ class TestAIProviders(unittest.TestCase):
         self.assertIn("Whirlpool®", desc_res.product_name)
         self.assertIn("Dishwashers", desc_res.product_name)
 
+    def test_gemini_primary_when_configured(self):
+        router = AIProviderRouter(primary="gemini")
+        self.assertEqual(router.primary_provider.provider_name, "Gemini")
+        self.assertEqual(router.secondary_provider.provider_name, "IBM watsonx.ai")
+
 if __name__ == "__main__":
     unittest.main()

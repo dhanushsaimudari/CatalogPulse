@@ -55,7 +55,7 @@ required_files = [
     "types/api.ts",
 ]
 
-print("--- SORTOLOG IQ Frontend File Structure Verification ---")
+print("--- CatalogPulse AI Frontend File Structure Verification ---")
 missing = []
 for f in required_files:
     full_p = os.path.join(frontend_dir, f)

@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="SORTOLOG IQ — Stateless AI-Powered Industrial Product Enrichment Engine API",
+    description="CatalogPulse AI — Industrial Product Catalog Intelligence and Enrichment Platform API",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",

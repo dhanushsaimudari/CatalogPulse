@@ -17,34 +17,52 @@ from threading import Lock
 
 class AIProviderRouter:
     """
-    SORTOLOG IQ Central Provider Router
+    CatalogPulse AI Central Provider Router
     
-    PRIMARY AI PROVIDER:   IBM watsonx.ai (meta-llama/llama-3-3-70b-instruct)
-    SECONDARY AI PROVIDER: Google Gemini API (gemini-2.5-flash)
+    PRIMARY AI PROVIDER:   Google Gemini API (gemini-2.5-flash / gemini-1.5-flash)
+    SECONDARY AI PROVIDER: IBM watsonx.ai (meta-llama/llama-3-3-70b-instruct)
     FALLBACK ENGINE:       Local Deterministic Intelligence Core
     """
-    def __init__(self):
-        self.primary_provider: AbstractAIProvider = WatsonxProvider()
-        self.secondary_provider: AbstractAIProvider = GeminiProvider()
+    def __init__(self, primary: Optional[str] = None):
+        self.watsonx_provider: AbstractAIProvider = WatsonxProvider()
+        self.gemini_provider: AbstractAIProvider = GeminiProvider()
+        
+        # In CatalogPulse AI: Gemini is the primary Google AI provider when credentials are available.
+        # When running in test suites without live credentials, router maintains watsonx as primary_provider
+        # and gemini as secondary_provider to preserve legacy assertion compatibility.
+        if primary == "gemini":
+            self.primary_provider = self.gemini_provider
+            self.secondary_provider = self.watsonx_provider
+        elif primary == "watsonx" or (not self.gemini_provider.is_available() and getattr(settings, "PRIMARY_AI_PROVIDER", "gemini") == "watsonx"):
+            self.primary_provider = self.watsonx_provider
+            self.secondary_provider = self.gemini_provider
+        elif self.gemini_provider.is_available():
+            self.primary_provider = self.gemini_provider
+            self.secondary_provider = self.watsonx_provider
+        else:
+            self.primary_provider = self.watsonx_provider
+            self.secondary_provider = self.gemini_provider
+
         self._classify_cache: Dict[str, Tuple[AIClassificationResult, str]] = {}
         self._extract_cache: Dict[str, Tuple[List[AIAttributeResult], str]] = {}
         self._desc_cache: Dict[str, Tuple[AIDescriptionResult, str]] = {}
         self._cache_lock = Lock()
 
     def get_overall_status(self) -> Tuple[AIProviderStatusEnum, str]:
-        if self.primary_provider.is_available():
-            return AIProviderStatusEnum.AI_AVAILABLE, "IBM watsonx.ai Primary Active (meta-llama/llama-3-3-70b-instruct)."
-        elif self.secondary_provider.is_available():
-            return AIProviderStatusEnum.AI_FALLBACK_ACTIVE, "IBM watsonx.ai unavailable. Switching to Gemini API Secondary Fallback."
-        elif self.primary_provider.is_circuit_open() and "quota" in self.primary_provider.get_health().message.lower():
+        if self.gemini_provider.is_available():
+            return AIProviderStatusEnum.AI_AVAILABLE, f"Google Gemini Primary Active ({settings.GEMINI_MODEL})."
+        elif self.watsonx_provider.is_available():
+            return AIProviderStatusEnum.AI_FALLBACK_ACTIVE, f"Google Gemini unconfigured. Using IBM watsonx.ai Fallback ({settings.WATSONX_MODEL_ID})."
+        elif (self.gemini_provider.is_circuit_open() and "quota" in self.gemini_provider.get_health().message.lower()) or \
+             (self.watsonx_provider.is_circuit_open() and "quota" in self.watsonx_provider.get_health().message.lower()):
             return AIProviderStatusEnum.AI_QUOTA_EXHAUSTED, "AI Provider quota/rate limit exhausted. Local deterministic engine active."
         else:
             return AIProviderStatusEnum.AI_DISABLED, "AI Providers Unavailable. Operating in Local Deterministic Engine Mode."
 
     def get_provider_health(self) -> Dict[str, ProviderHealth]:
         return {
-            "watsonx": self.primary_provider.get_health(),
-            "gemini": self.secondary_provider.get_health()
+            "watsonx": self.watsonx_provider.get_health(),
+            "gemini": self.gemini_provider.get_health()
         }
 
     def _deterministic_classify(self, description: str) -> AIClassificationResult:
@@ -314,28 +332,28 @@ class AIProviderRouter:
             logger.info(f"Session AI budget exhausted for {mpn}. Bypassing AI providers.")
             return self._deterministic_classify(description), "local_engine"
 
-        # 1. Try Primary Provider (IBM watsonx.ai)
+        # 1. Try Primary Provider (Google Gemini when configured, or IBM watsonx.ai)
         if self.primary_provider.is_available():
             try:
                 res = self.primary_provider.classify_product(mpn, description, manufacturer, brand)
                 if session:
-                    session.record_ai_call("IBM watsonx.ai")
-                return res, "IBM watsonx.ai"
+                    session.record_ai_call(self.primary_provider.provider_name)
+                return res, self.primary_provider.provider_name
             except Exception as e:
-                logger.warning(f"Primary AI Provider (IBM watsonx.ai) failed: {e}. Initiating failover.")
+                logger.warning(f"Primary AI Provider ({self.primary_provider.provider_name}) failed: {e}. Initiating failover.")
                 if session:
                     session.record_ai_fallback()
 
-        # 2. Try Secondary Provider (Gemini API Fallback)
+        # 2. Try Secondary Provider
         if self.secondary_provider.is_available():
             try:
-                logger.info(f"Executing Gemini secondary AI fallback for product {mpn}.")
+                logger.info(f"Executing secondary AI fallback ({self.secondary_provider.provider_name}) for product {mpn}.")
                 res = self.secondary_provider.classify_product(mpn, description, manufacturer, brand)
                 if session:
-                    session.record_ai_call("Gemini")
-                return res, "Gemini (Secondary Fallback)"
+                    session.record_ai_call(self.secondary_provider.provider_name)
+                return res, f"{self.secondary_provider.provider_name} (Secondary Fallback)"
             except Exception as e:
-                logger.warning(f"Secondary AI Provider (Gemini) failed: {e}.")
+                logger.warning(f"Secondary AI Provider ({self.secondary_provider.provider_name}) failed: {e}.")
                 if session:
                     session.record_ai_fallback()
 
@@ -367,10 +385,10 @@ class AIProviderRouter:
             try:
                 res = self.primary_provider.extract_attributes(mpn, description, classpath, lov_context)
                 if session:
-                    session.record_ai_call("IBM watsonx.ai")
-                return res, "IBM watsonx.ai"
+                    session.record_ai_call(self.primary_provider.provider_name)
+                return res, self.primary_provider.provider_name
             except Exception as e:
-                logger.warning(f"Primary AI Provider (IBM watsonx.ai) extraction failed: {e}")
+                logger.warning(f"Primary AI Provider ({self.primary_provider.provider_name}) extraction failed: {e}")
                 if session:
                     session.record_ai_fallback()
 
@@ -378,10 +396,10 @@ class AIProviderRouter:
             try:
                 res = self.secondary_provider.extract_attributes(mpn, description, classpath, lov_context)
                 if session:
-                    session.record_ai_call("Gemini")
-                return res, "Gemini (Secondary Fallback)"
+                    session.record_ai_call(self.secondary_provider.provider_name)
+                return res, f"{self.secondary_provider.provider_name} (Secondary Fallback)"
             except Exception as e:
-                logger.warning(f"Secondary AI Provider (Gemini) extraction failed: {e}")
+                logger.warning(f"Secondary AI Provider ({self.secondary_provider.provider_name}) extraction failed: {e}")
                 if session:
                     session.record_ai_fallback()
 
@@ -449,10 +467,10 @@ class AIProviderRouter:
             try:
                 res = self.primary_provider.generate_descriptions(mpn, manufacturer, brand, noun, attributes)
                 if session:
-                    session.record_ai_call("IBM watsonx.ai")
-                return self._sanitize_grounded_description(res), "IBM watsonx.ai"
+                    session.record_ai_call(self.primary_provider.provider_name)
+                return self._sanitize_grounded_description(res), self.primary_provider.provider_name
             except Exception as e:
-                logger.warning(f"Primary AI Provider (IBM watsonx.ai) description generation failed: {e}")
+                logger.warning(f"Primary AI Provider ({self.primary_provider.provider_name}) description generation failed: {e}")
                 if session:
                     session.record_ai_fallback()
 
@@ -460,10 +478,10 @@ class AIProviderRouter:
             try:
                 res = self.secondary_provider.generate_descriptions(mpn, manufacturer, brand, noun, attributes)
                 if session:
-                    session.record_ai_call("Gemini")
-                return self._sanitize_grounded_description(res), "Gemini (Secondary Fallback)"
+                    session.record_ai_call(self.secondary_provider.provider_name)
+                return self._sanitize_grounded_description(res), f"{self.secondary_provider.provider_name} (Secondary Fallback)"
             except Exception as e:
-                logger.warning(f"Secondary AI Provider (Gemini) description generation failed: {e}")
+                logger.warning(f"Secondary AI Provider ({self.secondary_provider.provider_name}) description generation failed: {e}")
                 if session:
                     session.record_ai_fallback()
 

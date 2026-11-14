@@ -43,6 +43,8 @@ yarn-error.log*
 
 # Runtime Storage & Data Files
 backend/storage_data/inputs/*
+!backend/storage_data/inputs/import-1e365f74_sortolog_sanity_test.csv
+!backend/storage_data/inputs/catalogpulse_demo_sample.csv
 backend/storage_data/outputs/*
 backend/storage_data/documents/*
 backend/storage_data/images/*

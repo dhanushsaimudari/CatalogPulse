@@ -9,17 +9,20 @@ router = APIRouter()
 def get_health():
     overall_status_enum, message = ai_provider_router.get_overall_status()
     provider_health = ai_provider_router.get_provider_health()
+    gemini_first = getattr(settings, "PRIMARY_AI_PROVIDER", "gemini").lower() != "watsonx"
+    primary_name = f"Google Gemini API ({settings.GEMINI_MODEL})" if gemini_first else f"IBM watsonx.ai ({settings.WATSONX_MODEL_ID})"
+    secondary_name = f"IBM watsonx.ai ({settings.WATSONX_MODEL_ID})" if gemini_first else f"Google Gemini API ({settings.GEMINI_MODEL})"
     return {
         "backend": "ok",
         "status": "ok",
-        "service": "sortolog-iq-backend",
+        "service": "catalogpulse-ai-backend",
         "app_name": settings.APP_NAME,
         "environment": settings.APP_ENV,
         "watsonx": provider_health["watsonx"].status.lower(),
         "gemini": provider_health["gemini"].status.lower(),
         "local_intelligence": "available",
-        "primary_provider": f"IBM watsonx.ai ({settings.WATSONX_MODEL_ID})",
-        "secondary_provider": f"Google Gemini API ({settings.GEMINI_MODEL})",
+        "primary_provider": primary_name,
+        "secondary_provider": secondary_name,
         "ai_status": overall_status_enum.value,
         "ai_message": message,
         "providers": {k: v.model_dump() for k, v in provider_health.items()},
@@ -33,10 +36,13 @@ def get_health():
 def get_ai_health():
     overall_status_enum, message = ai_provider_router.get_overall_status()
     provider_health = ai_provider_router.get_provider_health()
+    gemini_first = getattr(settings, "PRIMARY_AI_PROVIDER", "gemini").lower() != "watsonx"
+    primary_name = f"Google Gemini API ({settings.GEMINI_MODEL})" if gemini_first else f"IBM watsonx.ai ({settings.WATSONX_MODEL_ID})"
+    secondary_name = f"IBM watsonx.ai ({settings.WATSONX_MODEL_ID})" if gemini_first else f"Google Gemini API ({settings.GEMINI_MODEL})"
     return {
         "ai_status": overall_status_enum.value,
         "message": message,
-        "primary_provider": f"IBM watsonx.ai ({settings.WATSONX_MODEL_ID})",
-        "secondary_provider": f"Google Gemini API ({settings.GEMINI_MODEL})",
+        "primary_provider": primary_name,
+        "secondary_provider": secondary_name,
         "providers": {k: v.model_dump() for k, v in provider_health.items()}
     }

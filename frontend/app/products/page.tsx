@@ -42,8 +42,8 @@ export default function ProductsPage() {
       {/* Page Title */}
       <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800 font-mono">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Product Master Catalogue</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-sans mt-0.5">Enriched product catalog items matching Unilog 252-column schema</p>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Product Intelligence Master</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-sans mt-0.5">Enriched industrial product catalog with dynamic technical attributes, evidence tracing, and quality scores</p>
         </div>
         <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">Total Items: {products.length}</span>
       </div>

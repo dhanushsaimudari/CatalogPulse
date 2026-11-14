@@ -11,6 +11,8 @@ import {
   FlaskConical,
   BarChart3,
   FileSearch,
+  Download,
+  Settings,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -48,13 +50,14 @@ export const Sidebar: React.FC = () => {
   }, [pathname]);
 
   const navItems: NavItem[] = [
-    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'Upload', href: '/upload', icon: Upload },
-    { name: 'Products', href: '/products', icon: Package },
-    { name: 'Review Queue', href: '/review', icon: CheckSquare, badge: pendingCount !== null ? pendingCount.toString() : undefined },
-    { name: 'Evaluation Lab', href: '/evaluation', icon: FlaskConical },
-    { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+    { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'New Catalog', href: '/upload', icon: Upload },
+    { name: 'Product Intelligence', href: '/products', icon: Package },
+    { name: 'Review Center', href: '/review', icon: CheckSquare, badge: pendingCount !== null ? pendingCount.toString() : undefined },
+    { name: 'Validation', href: '/evaluation', icon: FlaskConical },
     { name: 'Evidence Viewer', href: '/evidence', icon: FileSearch },
+    { name: 'Export Center', href: '/export', icon: Download },
+    { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
   return (
@@ -62,12 +65,12 @@ export const Sidebar: React.FC = () => {
       <div>
         {/* Brand Header */}
         <div className={cn('p-4 border-b border-slate-200 dark:border-slate-800 flex items-center', collapsed ? 'justify-center' : 'gap-3')}>
-          <div className="w-8 h-8 rounded-md bg-blue-600 flex items-center justify-center text-white font-mono font-bold text-lg shadow-sm">
-            S
+          <div className="w-8 h-8 rounded-md bg-blue-600 flex items-center justify-center text-white font-mono font-bold text-sm shadow-sm tracking-tighter">
+            CP
           </div>
           <div className={cn(collapsed && 'hidden')}>
-            <h1 className="font-bold font-mono text-slate-900 dark:text-slate-100 tracking-wider text-sm">SORTOLOG IQ</h1>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-sans tracking-tight">Product Quality Engine</p>
+            <h1 className="font-bold font-mono text-slate-900 dark:text-slate-100 tracking-wider text-sm">CATALOGPULSE AI</h1>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-sans tracking-tight">Industrial Intelligence Platform</p>
           </div>
         </div>
 
@@ -116,12 +119,12 @@ export const Sidebar: React.FC = () => {
       {/* Footer Info */}
       <div className={cn('p-4 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 space-y-1 font-mono', collapsed && 'hidden')}>
         <div className="flex items-center justify-between text-[11px]">
-          <span>WORKSPACE</span>
-          <span className="text-slate-700 dark:text-slate-300 font-semibold">UniHack Master</span>
+          <span>AI ENGINE</span>
+          <span className="text-blue-600 dark:text-blue-400 font-semibold">Google Gemini</span>
         </div>
         <div className="flex items-center justify-between text-[11px]">
-          <span>UNILOG SCHEMA</span>
-          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">252 Fields</span>
+          <span>PIPELINE</span>
+          <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Evidence-Backed</span>
         </div>
       </div>
     </aside>

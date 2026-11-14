@@ -12,7 +12,7 @@ import { AutoFixCard } from '../../../components/enrichment/AutoFixCard';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { ArrowLeft, RefreshCw, FileSearch } from 'lucide-react';
 import Link from 'next/link';
 
 export default function ProductDetailPage() {
@@ -72,6 +72,12 @@ export default function ProductDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Link href="/evidence">
+            <Button variant="outline" size="sm" className="border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-300">
+              <FileSearch className="w-3.5 h-3.5" /> Source Evidence
+            </Button>
+          </Link>
+
           <Button variant="outline" size="sm" onClick={handleReprocess}>
             <RefreshCw className="w-3.5 h-3.5" /> Re-Process Item
           </Button>

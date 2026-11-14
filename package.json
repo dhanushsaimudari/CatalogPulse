@@ -1,8 +1,8 @@
 {
-  "name": "sortlog-iq",
+  "name": "catalogpulse-ai",
   "version": "1.0.0",
   "private": true,
-  "description": "SORTOLOG IQ — Open-World Industrial Product Intelligence & Enrichment Engine",
+  "description": "CatalogPulse AI — Industrial Product Catalog Intelligence and Enrichment Platform",
   "scripts": {
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",

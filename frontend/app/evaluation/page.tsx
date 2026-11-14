@@ -55,10 +55,10 @@ export default function EvaluationPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            Evaluation Lab <FlaskConical className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+            Validation & Quality Lab <FlaskConical className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 font-sans mt-0.5">
-            Automated quality evaluation engine evaluating active session product compliance
+            Deterministic industrial validation engine evaluating catalog completeness, UOM standardization, character boundaries, and attribute consistency
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -67,9 +67,9 @@ export default function EvaluationPage() {
             variant="primary"
             onClick={handleRunEval}
             disabled={loading}
-            className="bg-purple-600 hover:bg-purple-500 text-white"
+            className="bg-blue-600 hover:bg-blue-500 text-white"
           >
-            <Play className="w-3.5 h-3.5" /> Run Session Evaluation
+            <Play className="w-3.5 h-3.5" /> Run Validation Suite
           </Button>
         </div>
       </div>

@@ -18,7 +18,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => {
     // Read stored theme or system preference
-    const stored = localStorage.getItem('sortolog_theme') as Theme | null;
+    const stored = (localStorage.getItem('catalogpulse_theme') || localStorage.getItem('sortolog_theme')) as Theme | null;
     let initialTheme: Theme = 'dark';
 
     if (stored === 'dark' || stored === 'light') {
@@ -36,7 +36,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const root = document.documentElement;
     root.classList.remove('dark', 'light');
     root.classList.add(newTheme);
-    localStorage.setItem('sortolog_theme', newTheme);
+    localStorage.setItem('catalogpulse_theme', newTheme);
   };
 
   const setTheme = (newTheme: Theme) => {

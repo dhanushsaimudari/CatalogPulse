@@ -7,8 +7,8 @@ import { ConnectivityProvider } from '../lib/connectivity-context';
 import { ColdStartBanner } from '../components/layout/ConnectivityIndicator';
 
 export const metadata = {
-  title: 'SORTOLOG IQ — Industrial Product Intelligence',
-  description: 'From messy data to commerce-ready intelligence.',
+  title: 'CatalogPulse AI — Industrial Product Catalog Intelligence',
+  description: 'From raw industrial data to verified, commerce-ready catalogs.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             __html: `
               (function() {
                 try {
-                  var stored = localStorage.getItem('sortolog_theme');
+                  var stored = localStorage.getItem('catalogpulse_theme') || localStorage.getItem('sortolog_theme');
                   var theme = stored || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
                   document.documentElement.classList.remove('dark', 'light');
                   document.documentElement.classList.add(theme);
