@@ -41,42 +41,66 @@ Industrial manufacturers, suppliers, and distributors manage thousands of techni
 
 ## 3. Core Architecture & Workflow
 
-```text
-        Messy Industrial Feeds (CSV / XLSX / PDF / Images)
-                              │
-                              ▼
-                   [ 1. Ingestion Engine ]
-              File parsing, stream hashing, session isolation
-                              │
-                              ▼
-                [ 2. AI Intelligence Engine ]
-         Google Gemini (Primary) ──► IBM watsonx.ai (Secondary)
-                              │
-                              └──► Local Deterministic Heuristic (Offline)
-                              │
-                              ▼
-              [ 3. Open-World Dynamic Discovery ]
-       Manufacturer, brand, 4-tier taxonomy, dynamic attributes
-                              │
-                              ▼
-              [ 4. Deterministic Rule Validator ]
-       UOM spacing, character limits, duplicate MPNs, auto-fixes
-                              │
-                              ▼
-             [ 5. Side-by-Side Evidence Center ]
-       Physical bounding-box viewer (PDF & image source audit)
-                              │
-                              ▼
-            [ 6. Human-in-the-Loop Review Queue ]
-         Single & bulk approval, override edits, audit trails
-                              │
-                              ▼
-                 [ 7. Dual Export Center ]
-    ┌─────────────────────────┴─────────────────────────┐
-    ▼                                                   ▼
-[ Primary Clean Dynamic CSV ]             [ Legacy 252-Column Unilog CSV ]
-Universal schema union of all              Backward-compatible 
-discovered technical specs                 distributor schema projection
+![CatalogPulse AI System Architecture](docs/architecture.svg)
+
+```mermaid
+flowchart TD
+    %% Styling Classes
+    classDef inputStyle fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc,rx:8,ry:8
+    classDef ingestStyle fill:#0f172a,stroke:#06b6d4,stroke-width:2px,color:#f8fafc,rx:8,ry:8
+    classDef aiStyle fill:#1e1b4b,stroke:#a855f7,stroke-width:2.5px,color:#f8fafc,rx:8,ry:8
+    classDef engineStyle fill:#1e293b,stroke:#6366f1,stroke-width:2px,color:#f8fafc,rx:8,ry:8
+    classDef evidenceStyle fill:#1e293b,stroke:#f59e0b,stroke-width:2px,color:#f8fafc,rx:8,ry:8
+    classDef reviewStyle fill:#1e293b,stroke:#ec4899,stroke-width:2px,color:#f8fafc,rx:8,ry:8
+    classDef exportStyle fill:#062d22,stroke:#10b981,stroke-width:2.5px,color:#f8fafc,rx:8,ry:8
+
+    subgraph INTAKE ["1. DATA INGESTION TIER"]
+        A1["📄 PDF Spec Sheets & Cut-Sheets"]:::inputStyle
+        A2["📊 Unstructured CSV / XLSX Feeds"]:::inputStyle
+        A3["🖼️ Industrial Nameplate Images"]:::inputStyle
+    end
+
+    subgraph SESSION ["2. STATELESS SESSION ORCHESTRATION"]
+        B["⚡ Ingestion Service & Session Manager<br/><i>SHA-256 Payload Hash · In-Memory Thread-Safe Cache</i>"]:::ingestStyle
+    end
+
+    subgraph AI_ROUTER ["3. MULTI-TIER INTELLIGENCE ENGINE"]
+        C1["🌟 <b>Google Gemini API (Primary)</b><br/><i>gemini-2.5-flash via google-genai SDK<br/>Multimodal Vision · Structured Pydantic JSON</i>"]:::aiStyle
+        C2["🔄 <b>IBM watsonx.ai (Secondary)</b><br/><i>Llama-3.3-70B Circuit-Breaker Fallback</i>"]:::aiStyle
+        C3["⚙️ <b>Deterministic Local Engine (Offline)</b><br/><i>100% Offline Rule & Regex Classifier</i>"]:::aiStyle
+    end
+
+    subgraph DISCOVERY ["4. OPEN-WORLD ENRICHMENT & TAXONOMY"]
+        D1["🏷️ <b>Entity Normalization</b><br/><i>Mfr & Brand Canonicalization</i>"]:::engineStyle
+        D2["🌳 <b>Dynamic 4-Tier Taxonomy</b><br/><i>Dept > Class > Subclass > Category</i>"]:::engineStyle
+        D3["🔍 <b>Dynamic Attribute Discovery</b><br/><i>Voltage, Pressure, Dimensions, Materials</i>"]:::engineStyle
+    end
+
+    subgraph GOVERNANCE ["5. DETERMINISTIC RULES & EVIDENCE AUDIT"]
+        E1["📏 <b>Deterministic Rule Engine</b><br/><i>UOM Standards · Space Normalization · Duplicate MPN</i>"]:::evidenceStyle
+        E2["📐 <b>Physical Evidence Resolver</b><br/><i>PDF Bounding Boxes [ymin, xmin, ymax, xmax]</i>"]:::evidenceStyle
+        E3["✨ <b>Automated Safe Fixer</b><br/><i>One-Click UOM & Formatting Repairs</i>"]:::evidenceStyle
+    end
+
+    subgraph HITL ["6. HUMAN-IN-THE-LOOP REVIEW CENTER"]
+        F["👁️ <b>Side-by-Side Review Canvas</b><br/><i>Original Cut-Sheet (Left) ⇄ Extracted Data (Right)<br/>Keyboard Shortcuts (A / E / R) · Bulk Resolution</i>"]:::reviewStyle
+    end
+
+    subgraph DELIVERY ["7. DUAL EXPORT PROJECTION ENGINE"]
+        G1["🚀 <b>Clean Dynamic Intelligence CSV</b><br/><i>Uncapped Discoveries · Modern PIM & ERP Ready</i>"]:::exportStyle
+        G2["📦 <b>Legacy 252-Column Unilog CSV</b><br/><i>Fixed 50-Triplet Schema · Distributor Compatibility</i>"]:::exportStyle
+    end
+
+    %% Connections
+    A1 & A2 & A3 --> B
+    B --> C1
+    C1 -.->|Circuit Breaker Fallback| C2
+    C2 -.->|Offline Fallback| C3
+    C1 & C2 & C3 --> D1 & D2 & D3
+    D1 & D2 & D3 --> E1 & E2
+    E1 --> E3
+    E2 & E3 --> F
+    F -->|Approved & Verified SKUs| G1 & G2
 ```
 
 ### Operational Philosophy
